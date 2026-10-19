@@ -1,0 +1,9 @@
+{
+  "kwic_variant": "punkt",
+  "slice_grid": "halfyear",
+  "k": 100,
+  "eig_p": 1,
+  "n_target_slices": 2169,
+  "n_context_words": 66661,
+  "retained_frobenius_sq": 0.19733040034770966
+}

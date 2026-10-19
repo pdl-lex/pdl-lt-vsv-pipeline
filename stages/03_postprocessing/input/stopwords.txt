@@ -1,0 +1,36 @@
+# Mitgelieferte Stoppwortliste für die Nachbarlisten
+# Ein Lemma je Zeile, so geschrieben wie im Vokabular (Groß-/Kleinschreibung zählt).
+# Zeilen mit # und Leerzeilen werden ignoriert.
+# Die Liste ist unabhängig von den Parametern in pre und emb; Lemmata, die in
+# einem Lauf nicht im Vokabular stehen, werden übergangen.
+# Vorläufiger Bestand (2026-10-05), wird noch überarbeitet.
+
+# Anreden und parlamentarische Formeln
+Präsident
+Präsidentin
+Vizepräsident
+Vizepräsidentin
+Kollege
+Kollegin
+Dame
+Herr
+geehrt
+lieb
+Dank
+danken
+Beifall
+Zuruf
+Zwischenfrage
+Redezeit
+
+# häufige Verben ohne spezifische Bedeutung
+brauchen
+gehen
+legen
+sagen
+geben
+stehen
+tun
+machen
+kommen
+sehen

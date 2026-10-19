@@ -1,0 +1,16 @@
+[project]
+name = "pipeline"
+version = "0.1"
+requires-python = ">=3.13,<3.14"
+dependencies = [
+    "marimo>=0.24.0",
+    "polars>=1.44.1",
+    "numpy>=2.0",
+    "spacy>=3.8.16",
+    # SGNS-Pfad (pipeline-sgns.py). Wheels gibt es bis cp313 - das ist der
+    # Grund fuer requires-python <3.14 oben.
+    "gensim>=4.4.0",
+    "nltk>=3.10.3",
+    "somajo>=2.5.0",
+    "stanza>=1.14.0",
+]

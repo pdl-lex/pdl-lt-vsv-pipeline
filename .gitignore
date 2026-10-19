@@ -7,4 +7,4 @@ internal
 stages/01_preprocessing/input
 stages/01_preprocessing/output/somajo
 stages/01_preprocessing/output/window40
-*.diagnose.py
+*diagnose.py

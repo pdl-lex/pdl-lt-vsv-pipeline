@@ -507,7 +507,7 @@ def _(mo):
 
     Eine automatisch erzeugte Vorschlagsliste gibt es nicht mehr. Die frühere Rangliste nach „Kontrast“ (Spitzen-Kosinus minus mittlerer Kosinus eines Kandidaten) war kein etabliertes Verfahren und wurde entfernt. Als Ersatz ist eine Keyness-Analyse vor und nach der Zäsur vorgesehen (Log-Likelihood nach Dunning 1993; Rayson & Garside 2000) auf Basis der Kookkurrenz-Zählungen aus dem Preprocessing.
 
-    Das Front-End wird in Zukunft die Möglichkeit bieten, Zielwörter als Anker auszuschließen (denn die Anzeige von Trajektorien und Ankern zugleich ist verwirrend.)
+    Zielwörter dürfen zugleich Anker sein; die Ankerliste muss sie nicht aussparen. Das Frontend blendet Anker aus, die gerade als Trajektorie eingeblendet sind (denn die Anzeige von Trajektorie und Anker desselben Worts zugleich ist verwirrend). Maßgeblich ist dabei die aktuelle Auswahl, nicht die ganze Zielwortliste. Bei rund 600 Zielwörtern ist fast jeder Anker auch Zielwort, ein Ausschluss gegen die ganze Liste ließe keinen übrig.
 
     Die gesamte Ankerlogik funktioniert nicht wirklich bei einer großen Zahl von Zielwörtern (z.B. 500); allerdinsg funktioniert dann die 3D-Darstellung generell nicht vernünftig. Diese macht nur bei einer kleinen Zahl (<20) Sinn, also für die "Endauswahl".
     """)

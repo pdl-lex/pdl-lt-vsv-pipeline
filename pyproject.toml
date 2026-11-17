@@ -13,4 +13,6 @@ dependencies = [
     "nltk>=3.10.3",
     "somajo>=2.5.0",
     "stanza>=1.14.0",
+    # encoding detection in pipeline_pre_dataimport.py (before only a transitive dependency)
+    "charset-normalizer>=3.4",
 ]

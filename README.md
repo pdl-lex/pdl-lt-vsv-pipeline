@@ -1,4 +1,4 @@
-# pdl-lt-vsv-pipeline
+# pdl-lt-vsv-pipeline (Version: Leipzig 0.1)
 
 Datenpipeline für das Tool **„Visualisierung Semantischer Vektoren" (VSV)**
 ([`pdl-lt-vsv`](../pdl-lt-vsv)). Sie erzeugt aus einem Textkorpus ein

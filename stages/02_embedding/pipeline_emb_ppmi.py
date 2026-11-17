@@ -411,16 +411,16 @@ def _(mo):
 
     Die vollständige SVD ist eine verlustfreie Zerlegung. Die Reduktion entsteht erst durch die Beschränkung auf die
     k größten Singulärwerte.
-    k und der Exponent der Eigenwertgewichtung p (Wortvektor = U_k · Σ_k^p; Caron 2001; Levy, Goldberg & Dagan 2015)
-    sind gemeinsam kalibriert (`internal/pipeline-diagnose.py`, Abschnitt "Gewichtungsvarianten", s. Readme):
-    Mit sinkendem k sinkt der Volumeneffekt, die zeitliche Ordnung der Zeitscheiben eines Worts tritt deutlicher
-    hervor, und die Zielwörter sind besser voneinander getrennt, bis etwa k = 20. Bei kleinerem k geht die zeitliche
-    Ordnung verloren, und das Vorzeichen des Volumeneffekts kehrt sich um. p = 0,5 senkt den Volumeneffekt
-    zusätzlich, ohne die übrigen Kennwerte zu verschlechtern.
+    Neben k wird der Exponent p der Eigenwertgewichtung festgelegt (Zeilenvektor = U_k · Σ_k^p; Caron 2001;
+    Levy, Goldberg & Dagan 2015). p = 1 gewichtet jede Dimension mit ihrem vollen Singulärwert, kleinere Werte
+    verringern das Gewicht der führenden Dimensionen gegenüber den übrigen.
 
-    Regel: k = 25 fest, p = 0,5, für alle Zeitraster.
+    Geeignete Werte für k und p hängen von den Daten ab, etwa von der Zahl der Zielwörter, der Größe der Zeitscheiben
+    und der Belegung der Zeilen. Sie sollten für jedes Korpus und jedes Zeitraster gemeinsam geprüft werden.
+    Aufschluss darüber gibt das Notebook `pipeline_emb_ppmi_diagnose.py` (Abschnitt "Rang k der SVD und Exponent p
+    der Eigenwertgewichtung").
 
-    **TODO: Diagnose besser erläutern**
+    Die in der folgenden Zelle gesetzten Werte sind ein vorläufiger Stand.
     """)
     return
 

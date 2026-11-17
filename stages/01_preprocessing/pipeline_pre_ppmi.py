@@ -260,11 +260,13 @@ def _():
 @app.cell
 def _():
     # If you want to process a large list of target words, the code below reads them from a CSV file
+    # The file must start with a header row (e.g. "target_form"): the first line is always skipped,
+    # so a list without header silently loses its first target word.
 
     import csv
     with open("input/target_list.csv", encoding="utf-8", newline="") as f2:
         reader = csv.reader(f2)
-        next(reader, None)  # skip header – omit if not present
+        next(reader, None)  # skip header row (required, see above)
         target_forms = {row[0].strip() for row in reader if row and row[0].strip()}
 
     print(target_forms)

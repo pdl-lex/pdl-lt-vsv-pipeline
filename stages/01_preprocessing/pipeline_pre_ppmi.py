@@ -291,8 +291,11 @@ def _(corpus, pl, speaker_facet):
 def _(mo):
     mo.md(r"""
     ## Definition Zielwörter
-    Als Zielwörter werden in diesem Beispiel nur Substantive gewählt, um Probleme mit der Flexion und Satzstellung zu vermeiden. "Drohne" und "Drohnen" sind Beispiele für einfache Flexionen. Gesucht werden nur ganze Wörter wie genannt, keine Komposita.
-    Will man anderen Wortarten (vor allem Verben) einbeziehen, wird eine aufwändigere grammatikalische Behandlung nötig.
+    Die Zielwörter stehen in `input/target_forms.csv`, einer Zuordnung von Formen zu Lemmata (Spalten `form;lemma;source`, UTF-8, Trennzeichen `;`). Gesucht wird nach jeder Form als ganzem Wort; das Lemma des Treffers kommt direkt aus der Liste, nicht aus dem Lemmatizer.
+
+    Die Zuordnung ist bewusst weit: Flexionsformen, Schreibvarianten (alte Rechtschreibung, Bindestrich), Transliterationen und gegenderte Formen führen auf ein Lemma (`Kyjiw` → `Kiew`, `Belarus` → `Weißrussland`, `Soldat*innen`, `SoldatInnen` → `Soldat`). Stanza allein leistet das nicht: es löst nur die Flexion auf und macht aus gegenderten Formen eigene Lemmata (`Soldat:in`, `Soldat/-inne`).
+
+    Formen müssen einzelne Tokens sein, weil die Suche auf Leerzeichen-Tokens arbeitet; Mehrwortausdrücke („Kalter Krieg“) können nicht treffen. Erzeugt wird die Liste mit `build_target_forms.py` aus `input/target_list_nonfinal.csv`; die Zielwörter ohne Flexionsformen stehen in `input/target_lemmas.csv`.
     """)
     return
 
@@ -319,19 +322,29 @@ def _():
 
 
 @app.cell
-def _():
-    # If you want to process a large list of target words, the code below reads them from a CSV file
-    # The file must start with a header row (e.g. "target_form"): the first line is always skipped,
-    # so a list without header silently loses its first target word.
-
+def _(normalize_chars, re):
+    # target word list: form -> lemma (input/target_forms.csv, built by build_target_forms.py)
+    # columns form;lemma;source with header, UTF-8 (with or without BOM), separator ";"
     import csv
-    with open("input/target_list.csv", encoding="utf-8", newline="") as f2:
-        reader = csv.reader(f2)
-        next(reader, None)  # skip header row (required, see above)
-        target_forms = {row[0].strip() for row in reader if row and row[0].strip()}
 
-    print(target_forms)
-    return (target_forms,)
+    target_form_lemmas = {}  # form -> lemma
+    with open("input/target_forms.csv", encoding="utf-8-sig", newline="") as _fh:
+        for _row in csv.DictReader(_fh, delimiter=";"):
+            # same character normalization as the corpus, otherwise e.g. a U+2011 hyphen never matches
+            _form = normalize_chars(_row["form"].strip())
+            _lemma = normalize_chars(_row["lemma"].strip())
+            if not _form:
+                continue
+            assert not re.search(r"\s", _form), f"Zielwort-Form ist kein einzelnes Token: {_form!r}"
+            assert target_form_lemmas.get(_form, _lemma) == _lemma, (
+                f"Form {_form!r} hat zwei Lemmata: {target_form_lemmas[_form]!r}, {_lemma!r}"
+            )
+            target_form_lemmas[_form] = _lemma
+
+    # data type is an immutable set, which is faster to process than a list
+    target_forms = frozenset(target_form_lemmas)
+    print(f"{len(target_forms):,} Formen, {len(set(target_form_lemmas.values())):,} Zielwort-Lemmata")
+    return target_form_lemmas, target_forms
 
 
 @app.cell(hide_code=True)
@@ -752,7 +765,7 @@ def _(mo):
     mo.md(r"""
     ## Lemmatisierung und POS-Bestimmung
 
-    Sowohl die Zielwörter als auch insbesondere die Text- bzw- Kontextwörter liegen noch in ihrer regulären, das heisst gemäß Grammatik flektierten Form vor. Um sie später vergleichen zu können, müssen sie auf ihre einheitliche Grundform (z.B. "Drohnen" > "Drohne") zurückgeführt werden. Im gleichen Zuge wird auch die Wortart mit bestimmt - diese kann später zur Filterung verwendet werden.
+    Die Text- bzw. Kontextwörter liegen noch in ihrer regulären, das heisst gemäß Grammatik flektierten Form vor. Um sie später vergleichen zu können, müssen sie auf ihre einheitliche Grundform (z.B. "Drohnen" > "Drohne") zurückgeführt werden. Im gleichen Zuge wird auch die Wortart mit bestimmt - diese kann später zur Filterung verwendet werden. Das Lemma der Zielwörter kommt nicht vom Lemmatizer, sondern aus der Zielwortliste (siehe „Definition Zielwörter“).
 
     Ggw. stehen zwei Lemmatizer zur Verfügung: spaCy und Stanza, wobei Stanza innerhalb der Pipeline von spaCy genutzt wird.
     Zwischenstand: spaCy ist schneller, Stanza besser.
@@ -827,39 +840,121 @@ def _(kwic_hits, mo, nlp, pl, target_lemma_map_spacy):
 
 
 @app.cell
-def _(assets_dir, target_forms):
+def _(assets_dir, target_form_lemmas, target_forms):
     import stanza
-    from stanza import DownloadMethod
 
-    nlp_st = stanza.Pipeline(
-        "de",
-        processors="tokenize,pos,lemma",
-        tokenize_pretokenized=True,
-        dir=str(assets_dir / "stanza_resources"),
-        download_method=None,  # offline: use only the models in assets/stanza_resources
-        logging_level="WARN",
-    )
+    # target lemma per form: from the target word list (target_forms.csv)
+    # Before, Stanza lemmatized every form on its own (one-token sentence, no context). Tested on the
+    # 2,615 forms of the list (2026-11-17): only 472 of 608 groups got a single lemma. Stanza resolves
+    # inflection (Kriegen -> Krieg), but keeps gendered forms as own lemmas (Soldat*in, Soldat:in, broken
+    # ones like Soldat/-inne), and does not merge spelling variants or transliterations (Kiew/Kyjiw,
+    # Weißrussland -> "Weißrußland"). Kept as switch, default off.
+    TARGET_LEMMAS_FROM_STANZA = False
 
-    words = sorted(target_forms)
-    doc = nlp_st([[w] for w in words])  # jedes Wort = ein "Satz" aus einem Token
-    target_lemmas_stanza = [s.words[0].lemma for s in doc.sentences]
-    target_lemma_map_stanza = dict(zip(sorted(target_forms), target_lemmas_stanza))
-    target_lemma_map_stanza
-    return stanza, target_lemma_map_stanza
+    if TARGET_LEMMAS_FROM_STANZA:
+        nlp_st = stanza.Pipeline(
+            "de",
+            processors="tokenize,pos,lemma",
+            tokenize_pretokenized=True,
+            dir=str(assets_dir / "stanza_resources"),
+            download_method=None,  # offline: use only the models in assets/stanza_resources
+            logging_level="WARN",
+        )
+        _words = sorted(target_forms)
+        _doc = nlp_st([[_w] for _w in _words])  # every word = one "sentence" of one token
+        target_lemma_map = dict(zip(_words, (_s.words[0].lemma for _s in _doc.sentences)))
+    else:
+        target_lemma_map = dict(target_form_lemmas)
+    return stanza, target_lemma_map
 
 
 @app.function
-def lemmatize_batch(batch, nlp, target_lemma_map, chunk=500, on_progress=None):
+def make_context_mapper(form_lemmas, gender_rule=True):
+    """
+    Return a function that maps the words of a context text before it goes to Stanza.
+
+    The returned function takes a text and returns (new_text, spans). Every whitespace token
+    is split like strip_punctuation() into punctuation at the edges and a core:
+    - core is a form in `form_lemmas` (the target word list): replaced by its lemma, and the
+      lemma is fixed, i.e. it is used as is instead of Stanza's lemma ("Kyjiws" -> "Kiew",
+      "Soldat*innen," -> "Soldat,"). spans lists (start, end, lemma) of these replacements in
+      new_text.
+    - gender_rule, core not in the list: a gendered form is written as the plain feminine
+      form, which Stanza lemmatizes cleanly ("Bürger*innen", "Bürger:innen", "BürgerInnen" ->
+      "Bürgerinnen" -> lemma "Bürgerin"; "Abgeordnete:r" -> "Abgeordnete"). Covered are the
+      signs * : _ / /- · and the Binnen-I. The feminine lemma is then reduced to the masculine
+      base form after Stanza, with the vocabulary of the whole run (feminine_base_map), so all
+      ways of writing end up at "Bürger"; the stem alone cannot be used for that ("Kolleg*innen"
+      -> "Kolleg", but the base form is "Kollege").
+
+    Why before Stanza: Stanza's tokenizer splits gendered forms ("Soldat*innen" -> "Soldat",
+    "*", "innen"; "Soldat:innen" -> "Soldat", ":innen"), so after Stanza they cannot be mapped,
+    and the pieces end up as context words of their own.
+    """
+    import re
+
+    token = re.compile(r"\S+")
+    edges = re.compile(r"^(\W*)(.*?)(\W*)$", re.S)  # same split as strip_punctuation()
+    gender_sign = re.compile(r"^(\w*[a-zäöüß])(?:/-|[*:_/·])(in|innen)$")
+    binnen_i = re.compile(r"^([A-ZÄÖÜ]\w*[a-zäöüß])(In|Innen)$")
+    adj_sign = re.compile(r"^(\w*[a-zäöüß]e)[*:_/·]r$")
+
+    def lookup(core):
+        # -> (replacement, fixed lemma or None), or None if the core stays as it is
+        if core in form_lemmas:
+            return form_lemmas[core], form_lemmas[core]
+        if gender_rule:
+            for rule in (gender_sign, binnen_i):
+                m = rule.match(core)
+                if m:
+                    return m[1] + m[2].lower(), None  # Bürger + innen
+            m = adj_sign.match(core)
+            if m:
+                return m[1], None  # Abgeordnete
+        return None
+
+    def map_text(text):
+        out, spans, pos, n = [], [], 0, 0  # n = length of the output so far
+        for m in token.finditer(text):
+            out.append(text[pos : m.start()])
+            n += m.start() - pos
+            pos = m.end()
+            lead, core, trail = edges.match(m.group()).groups()
+            found = lookup(core) if core else None
+            if found is None:
+                out.append(m.group())
+                n += len(m.group())
+                continue
+            new, fixed = found
+            out += [lead, new, trail]
+            if fixed is not None:
+                spans.append((n + len(lead), n + len(lead) + len(new), fixed))
+            n += len(lead) + len(new) + len(trail)
+        out.append(text[pos:])
+        return "".join(out), spans
+
+    return map_text
+
+
+@app.function
+def lemmatize_batch(batch, nlp, target_lemma_map, context_mapper=None, chunk=500, on_progress=None):
     """
     Lemmatize the contexts of a batch of KWIC hits with Stanza; returns the batch with
-    the columns target_lemma, context_lemmas and context_pos_tags added.
+    the columns target_lemma, context_lemmas, context_pos_tags and context_gender added
+    (context_gender: Stanza's grammatical gender Masc/Fem/Neut, null if none; used by
+    feminine_base_map).
 
     Hit and contexts are lemmatized together as one text, so that Stanza sees the whole
     sentence; afterwards each word is assigned to "before" or "after" by its character
     position, the hit itself is left out. Punctuation is skipped.
+
+    context_mapper (see make_context_mapper) maps the context words before Stanza; words
+    it replaces with a fixed lemma get that lemma, even if Stanza splits them into several
+    tokens. None = contexts go to Stanza unchanged.
     """
     import polars as pl
     import stanza
+    from bisect import bisect_right
 
     # define the various parts
     # the 'b or ""' replaces null values with empty strings
@@ -867,11 +962,29 @@ def lemmatize_batch(batch, nlp, target_lemma_map, chunk=500, on_progress=None):
     contexts_before = [(b or "").strip() for b in batch["context_before"].to_list()]
     target_hit_forms = [(t or "").strip() for t in batch["target_form"].to_list()]
     contexts_after = [(a or "").strip() for a in batch["context_after"].to_list()]
+
+    # map the context words (target word list, gendered forms); fixed_spans holds per text the
+    # (start, end, lemma) of replaced words, as positions in the combined text
+    fixed_spans = [[] for _ in contexts_before]
+    if context_mapper is not None:
+        for i, (b, t, a) in enumerate(zip(contexts_before, target_hit_forms, contexts_after)):
+            b, spans_b = context_mapper(b)
+            a, spans_a = context_mapper(a)
+            offset = len(b) + 1 + len(t) + 1  # start of context_after in the combined text
+            contexts_before[i], contexts_after[i] = b, a
+            fixed_spans[i] = spans_b + [(s + offset, e + offset, lem) for s, e, lem in spans_a]
     texts = [f"{b} {t} {a}" for b, t, a in zip(contexts_before, target_hit_forms, contexts_after)]
 
     # initialize empty result lists
-    before_lemmas, before_pos_tags = [], []
-    after_lemmas, after_pos_tags = [], []
+    before_lemmas, before_pos_tags, before_genders = [], [], []
+    after_lemmas, after_pos_tags, after_genders = [], [], []
+
+    def gender(word):
+        # grammatical gender from Stanza's features ("Case=Nom|Gender=Fem|Number=Sing"), or None
+        for feat in (word.feats or "").split("|"):
+            if feat.startswith("Gender="):
+                return feat[7:]
+        return None
 
     # inner loop: feed `chunk` texts to stanza at once. idx denotes line numbers in the batch
     for start in range(0, len(texts), chunk):
@@ -882,28 +995,47 @@ def lemmatize_batch(batch, nlp, target_lemma_map, chunk=500, on_progress=None):
         for i, doc in zip(idx, docs):
             t_start = len(contexts_before[i]) + 1  # starts at context_before +1
             t_end = t_start + len(target_hit_forms[i])  # ends at context_before +1 + len
-            bl, bp, al, ap = [], [], [], []
+            bl, bp, bg, al, ap, ag = [], [], [], [], [], []
+            spans = fixed_spans[i]
+            span_starts = [s for s, _, _ in spans]
+            spans_done = set()
 
             # process tokens in the document
             for sent in doc.sentences:
                 for tok in sent.tokens:  # tokens are surface forms (e.g. "zum")
-                    for w in tok.words:  # words are syntactical units (e.g. "zu" + "dem")
-                        if w.upos == "PUNCT":  # skip punctuation
+                    # word with a fixed lemma from the context mapping: the first token inside its
+                    # span gets the lemma, further tokens of the same span are skipped
+                    k = bisect_right(span_starts, tok.start_char) - 1
+                    if k >= 0 and tok.start_char < spans[k][1]:
+                        if k in spans_done:
                             continue
-                        lemma = w.lemma or w.text  # if no lemma is available, use original text
+                        spans_done.add(k)
+                        w0 = next((w for w in tok.words if w.upos != "PUNCT"), None)
+                        words = [(spans[k][2], w0.upos if w0 else "X", gender(w0) if w0 else None)]
+                    else:
+                        # words are syntactical units (e.g. "zu" + "dem"); punctuation is skipped;
+                        # if no lemma is available, use original text
+                        words = [
+                            (w.lemma or w.text, w.upos, gender(w)) for w in tok.words if w.upos != "PUNCT"
+                        ]
+                    for lemma, upos, gen in words:
                         if tok.end_char <= t_start:  # determine whether it belongs to before or after
                             bl.append(lemma)
-                            bp.append(w.upos)
+                            bp.append(upos)
+                            bg.append(gen)
                         elif tok.start_char >= t_end:
                             al.append(lemma)
-                            ap.append(w.upos)
+                            ap.append(upos)
+                            ag.append(gen)
                         # else: belongs to target word => ignore
 
             # append to lists
             before_lemmas.append(bl)
             before_pos_tags.append(bp)
+            before_genders.append(bg)
             after_lemmas.append(al)
             after_pos_tags.append(ap)
+            after_genders.append(ag)
 
         if on_progress:
             on_progress(len(idx))
@@ -918,6 +1050,8 @@ def lemmatize_batch(batch, nlp, target_lemma_map, chunk=500, on_progress=None):
             pl.Series("context_before_pos_tags", before_pos_tags, dtype=list_type),
             pl.Series("context_after_lemmas", after_lemmas, dtype=list_type),
             pl.Series("context_after_pos_tags", after_pos_tags, dtype=list_type),
+            pl.Series("context_before_genders", before_genders, dtype=list_type),
+            pl.Series("context_after_genders", after_genders, dtype=list_type),
         )
         # adds the target lemma, mapped from the target form via the dict generated above
         .with_columns(pl.col("target_form").replace(target_lemma_map).alias("target_lemma"))
@@ -926,27 +1060,41 @@ def lemmatize_batch(batch, nlp, target_lemma_map, chunk=500, on_progress=None):
         .with_columns(
             pl.concat_list("context_before_lemmas", "context_after_lemmas").alias("context_lemmas"),
             pl.concat_list("context_before_pos_tags", "context_after_pos_tags").alias("context_pos_tags"),
+            pl.concat_list("context_before_genders", "context_after_genders").alias("context_gender"),
         )
         # also drop the separate columns
         # this way, the data structure is identical between spacy and stanza files
+        # (except context_gender, which only Stanza writes)
         .drop(
             "context_before_lemmas",
             "context_before_pos_tags",
             "context_after_lemmas",
             "context_after_pos_tags",
+            "context_before_genders",
+            "context_after_genders",
         )
     )
 
 
 @app.function
-def lemmatize_kwic_hits(kwic_hits, nlp, target_lemma_map, out_path, batch_size=20_000, on_progress=None):
+def lemmatize_kwic_hits(
+    kwic_hits,
+    nlp,
+    target_lemma_map,
+    out_path,
+    context_mapper=None,
+    settings=None,
+    batch_size=20_000,
+    on_progress=None,
+):
     """
     Lemmatize all KWIC hits batch by batch and write the result to one parquet file.
 
     Every batch of `batch_size` hits is written as its own part file to <out_path stem>_parts/,
     so only one batch of lemma lists is held in memory. If a run is aborted, the next run
     skips the parts already written. The parts belong to exactly one input: a fingerprint
-    of kwic_hits and the batch size is stored with them, and if it differs, the parts are
+    of kwic_hits, the batch size, the target lemma map and `settings` (a JSON-serializable
+    dict describing context_mapper) is stored with them, and if it differs, the parts are
     deleted and recomputed. When all parts are done, they are combined into out_path
     (streaming) and deleted. Returns the number of batches that were computed in this run.
     """
@@ -964,6 +1112,10 @@ def lemmatize_kwic_hits(kwic_hits, nlp, target_lemma_map, out_path, batch_size=2
         "rows": kwic_hits.height,
         "batch_size": batch_size,
         "hash": hashlib.sha1(kwic_hits.hash_rows(seed=0).to_numpy().tobytes()).hexdigest(),
+        "target_lemma_map": hashlib.sha1(
+            json.dumps(sorted(target_lemma_map.items()), ensure_ascii=False).encode("utf-8")
+        ).hexdigest(),
+        "settings": settings or {},
     }
     if parts_dir.exists():
         try:
@@ -984,7 +1136,9 @@ def lemmatize_kwic_hits(kwic_hits, nlp, target_lemma_map, out_path, batch_size=2
             if on_progress:
                 on_progress(batch.height)
             continue
-        lemmatized = lemmatize_batch(batch, nlp, target_lemma_map, on_progress=on_progress)
+        lemmatized = lemmatize_batch(
+            batch, nlp, target_lemma_map, context_mapper=context_mapper, on_progress=on_progress
+        )
         tmp = part.with_name(part.stem + ".tmp.parquet")
         lemmatized.write_parquet(tmp)
         tmp.replace(part)
@@ -1000,6 +1154,7 @@ def lemmatize_kwic_hits(kwic_hits, nlp, target_lemma_map, out_path, batch_size=2
             pl.lit(None, pl.Utf8).alias("target_lemma"),
             pl.lit(None, empty).alias("context_lemmas"),
             pl.lit(None, empty).alias("context_pos_tags"),
+            pl.lit(None, empty).alias("context_gender"),
         ).write_parquet(tmp)
     tmp.replace(out_path)
     shutil.rmtree(parts_dir)
@@ -1009,7 +1164,13 @@ def lemmatize_kwic_hits(kwic_hits, nlp, target_lemma_map, out_path, batch_size=2
 @app.cell
 def _(mo):
     mo.md(r"""
-    Die Lemmatisierung des Kontexts läuft in Stapeln zu 20.000 Treffern, jeder Stapel wird sofort als Teildatei gespeichert (`output/kwic_hits_lemmatized_stanza_<variante>_parts/`). Wird der Lauf abgebrochen, setzt der nächste Lauf beim ersten fehlenden Stapel fort. Das gilt nur, solange die KWIC-Treffer dieselben sind, sonst wird neu begonnen. Am Ende werden die Teile zu einer Datei zusammengeführt und gelöscht.
+    Die Lemmatisierung des Kontexts läuft in Stapeln zu 20.000 Treffern, jeder Stapel wird sofort als Teildatei gespeichert (`output/kwic_hits_lemmatized_stanza_<variante>_parts/`). Wird der Lauf abgebrochen, setzt der nächste Lauf beim ersten fehlenden Stapel fort. Das gilt nur, solange die KWIC-Treffer, die Zielwortliste und die Mapping-Einstellungen dieselben sind, sonst wird neu begonnen. Am Ende werden die Teile zu einer Datei zusammengeführt und gelöscht.
+
+    **Mapping der Kontextwörter** (vor Stanza, beide Schalter standardmäßig an):
+    * *Zielwortliste auf Kontextwörter anwenden*: Kontextwörter, die als Form in der Zielwortliste stehen, bekommen deren Lemma (`Kyjiw` → `Kiew`, `Soldat*innen` → `Soldat`). So ist ein Wort als Kontext dieselbe Dimension, unter welcher Schreibung es auch vorkommt.
+    * *Gegenderte Formen außerhalb der Liste vereinheitlichen*: Formen mit Genderzeichen (`* : _ / /- ·`) und Binnen-I werden als einfache feminine Form geschrieben, bevor Stanza sie lemmatisiert (`Bürger*innen`, `BürgerInnen` → `Bürgerinnen`, Lemma `Bürgerin`; `Abgeordnete:r` → `Abgeordnete`). Auf die Grundform `Bürger` führt sie der Schritt „Movierte Feminina“ weiter unten.
+
+    Das Mapping muss vor Stanza stattfinden, weil der Stanza-Tokenizer gegenderte Formen zerlegt (`Soldat*innen` → `Soldat` `*` `innen`, `Soldat:innen` → `Soldat` `:innen`); danach wären nur noch Bruchstücke zu sehen, die als eigene Kontextwörter in die Matrix eingingen. Die KWIC-Treffer selbst (`kwic_hits_*.csv`) bleiben unverändert.
     """)
     return
 
@@ -1017,21 +1178,28 @@ def _(mo):
 @app.cell
 def _(mo):
     run_lemma = mo.ui.run_button(label="Lemmatisierung starten")
-    run_lemma
-    return (run_lemma,)
+    map_contexts = mo.ui.checkbox(value=True, label="Zielwortliste auf Kontextwörter anwenden")
+    gender_rule = mo.ui.checkbox(
+        value=True, label="Gegenderte Formen außerhalb der Liste vereinheitlichen (Bürger*innen → Bürgerinnen)"
+    )
+    mo.vstack([map_contexts, gender_rule, run_lemma])
+    return gender_rule, map_contexts, run_lemma
 
 
 @app.cell
 def _(
     Path,
     assets_dir,
+    gender_rule,
     kwic_hits,
     kwic_variant,
+    map_contexts,
     mo,
     pl,
     run_lemma,
     stanza,
-    target_lemma_map_stanza,
+    target_form_lemmas,
+    target_lemma_map,
 ):
     # stanza lemmatization pipeline
     # not 100% identical to the spacy pipeline, contains subtle improvements
@@ -1050,14 +1218,32 @@ def _(
         logging_level="WARN",
     )
 
+    # mapping of the context words before Stanza (see make_context_mapper); the settings go into
+    # the fingerprint of the part files, so a changed setting starts a new run
+    import hashlib as _hashlib
+
+    _settings = {
+        "map_contexts": map_contexts.value,
+        "gender_rule": gender_rule.value,
+        # the list used for the contexts (differs from target_lemma_map with TARGET_LEMMAS_FROM_STANZA)
+        "context_list": _hashlib.sha1(repr(sorted(target_form_lemmas.items())).encode("utf-8")).hexdigest(),
+    }
+    _mapper = None
+    if map_contexts.value or gender_rule.value:
+        _mapper = make_context_mapper(
+            target_form_lemmas if map_contexts.value else {}, gender_rule=gender_rule.value
+        )
+
     # store results as parquet file
     _out = Path(f"output/kwic_hits_lemmatized_stanza_{kwic_variant}.parquet")
     with mo.status.progress_bar(total=kwic_hits.height, title="Lemmatisierung Kontext") as bar3:
         _n_computed = lemmatize_kwic_hits(
             kwic_hits,
             nlp_st2,
-            target_lemma_map_stanza,
+            target_lemma_map,
             _out,
+            context_mapper=_mapper,
+            settings=_settings,
             on_progress=lambda _n: bar3.update(increment=_n),
         )
 
@@ -1090,6 +1276,131 @@ def _(kwic_variant, pl):
     )
     kwic_hits_lemmatized.head(100).collect()
     return (kwic_hits_lemmatized,)
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ## Movierte Feminina auf die Grundform zurückführen
+    Das Geschlecht wird nicht unterschieden: Personenbezeichnungen auf *-in* (movierte Feminina) werden unter den Kontextwörtern auf die maskuline Grundform zurückgeführt (`Bürgerin` → `Bürger`, `Kollegin` → `Kollege`, `Ärztin` → `Arzt`). Zusammen mit dem Mapping vor Stanza (`Bürger*innen`, `BürgerInnen` → `Bürgerinnen` → `Bürgerin`) führen damit alle Schreibungen auf eine Dimension.
+
+    Eine feste Regel reicht dafür nicht (Umlaut: `Ärztin` → `Arzt`; *-e*: `Kollegin` → `Kollege`; Fehltreffer: `Stein`, `Termin`, `Benzin`). Deshalb wird die Grundform im Wortschatz des Laufs gesucht:
+    * Kandidat ist ein Substantiv-Lemma auf *-in*, das Stanza überwiegend als feminin bestimmt (das schließt `Stein`, `Termin`, `Benzin` aus).
+    * Grundform ist der Stamm oder Stamm + *e*, erst danach dieselben ohne Umlaut, jeweils der häufigste, der im Lauf als nicht-feminines Substantiv vorkommt. Bei Komposita ohne belegte Grundform hilft das Grundwort (`Bundesfamilienministerin` → `Ministerin` → `Bundesfamilienminister`). Sonst bleibt die feminine Form.
+    * Eine kleine Ausnahmeliste fängt Restfehler ab (`Polin` → `Pole` statt `Pol`; `Engin` ist ein Vorname).
+
+    Die Zuordnung wird als `output/<variante>/feminine_base_map_<variante>.csv` gespeichert und kann dort geprüft werden. Wörter der Zielwortliste sind nicht betroffen, sie haben ihr Lemma bereits aus der Liste. Läufe von vor 2026-11-17 haben keine Spalte `context_gender`; für sie entfällt der Schritt.
+    """)
+    return
+
+
+@app.function
+def feminine_base_map(kwic_hits_lemmatized, overrides=None):
+    """
+    Map feminine person nouns on -in among the context lemmas to their masculine base form,
+    using the vocabulary of the run itself; returns a DataFrame feminine, base, n_feminine, n_base
+    (lazy in, eager out).
+
+    A lemma is a candidate if it is a NOUN ending in "in" and Stanza tagged it Gender=Fem in at
+    least half of its occurrences. The base is searched in two groups, the first group that has
+    one wins, and within the group the most frequent: (1) stem, stem + "e" (Bürger, Kollege),
+    (2) the same with the last umlaut removed (Arzt, Franzose). A base must occur as a NOUN that
+    is mostly not feminine. A compound without such a base is mapped via its longest mapped head
+    (Parteikollegin -> head Kollegin -> Parteikollege), the base then need not occur in the run
+    (n_base 0). overrides: {feminine: base or None}, applied last (None = keep).
+    """
+    import polars as pl
+
+    nouns = (
+        kwic_hits_lemmatized.select(
+            pl.col("context_lemmas").alias("lemma"),
+            pl.col("context_pos_tags").alias("upos"),
+            pl.col("context_gender").alias("gender"),
+        )
+        .explode("lemma", "upos", "gender")
+        .filter(pl.col("upos") == "NOUN")
+        .group_by("lemma")
+        .agg(pl.len().alias("n"), (pl.col("gender") == "Fem").fill_null(False).mean().alias("fem_share"))
+        .collect()
+    )
+    n = dict(zip(nouns["lemma"], nouns["n"]))
+    feminine = dict(zip(nouns["lemma"], nouns["fem_share"] >= 0.5))
+
+    plain = str.maketrans("äöüÄÖÜ", "aouAOU")
+
+    def candidates(stem):
+        yield [stem, stem + "e"]
+        # last umlaut removed ("Ärzt" -> "Arzt", "Bäuer" -> "Bauer", "Französ" -> "Franzos")
+        i = max(stem.rfind(u) for u in "äöüÄÖÜ")
+        if i >= 0:
+            s = stem[:i] + stem[i].translate(plain) + stem[i + 1 :]
+            yield [s, s + "e"]
+
+    result, unmapped = {}, []
+    for lemma, count in n.items():
+        if not (lemma.endswith("in") and len(lemma) > 4 and lemma[0].isupper() and feminine[lemma]):
+            continue
+        for group in candidates(lemma[:-2]):
+            found = [c for c in group if c in n and not feminine[c]]
+            if found:
+                base = max(found, key=lambda c: n[c])
+                result[lemma] = (base, count, n[base])
+                break
+        else:
+            unmapped.append(lemma)
+    # compounds whose masculine form does not occur in the run: map via the longest mapped head
+    # ("Bundesfamilienministerin" -> head "Ministerin" -> "Bundesfamilienminister")
+    for lemma in unmapped:
+        for i in range(1, len(lemma) - 4):
+            head = lemma[i].upper() + lemma[i + 1 :]
+            if head in result:
+                base = lemma[:i] + result[head][0][0].lower() + result[head][0][1:]
+                result[lemma] = (base, n[lemma], n.get(base, 0))
+                break
+    for fem, base in (overrides or {}).items():
+        if base is None:
+            result.pop(fem, None)
+        elif fem in n:
+            result[fem] = (base, n[fem], n.get(base, 0))
+    schema = {"feminine": pl.Utf8, "base": pl.Utf8, "n_feminine": pl.Int64, "n_base": pl.Int64}
+    return pl.DataFrame(
+        [(f, b, nf, nb) for f, (b, nf, nb) in result.items()], schema=schema, orient="row"
+    ).sort("n_feminine", "feminine", descending=[True, False])
+
+
+@app.cell
+def _(mo):
+    demove_feminines = mo.ui.checkbox(value=True, label="Movierte Feminina auf die Grundform zurückführen")
+    demove_feminines
+    return (demove_feminines,)
+
+
+@app.cell
+def _(demove_feminines, kwic_hits_lemmatized, kwic_variant, pl):
+    # residual errors of the vocabulary search (checked on the Bundestag run, punkt, 2026-11-17)
+    FEMININE_OVERRIDES = {
+        "Polin": "Pole",  # would be "Pol"
+        "Engin": None,  # first name
+    }
+
+    if not demove_feminines.value:
+        kwic_hits_contexts = kwic_hits_lemmatized
+        print("Movierte Feminina: ausgeschaltet")
+    elif "context_gender" not in kwic_hits_lemmatized.collect_schema().names():
+        kwic_hits_contexts = kwic_hits_lemmatized
+        print("Movierte Feminina: Lauf ohne Spalte context_gender, Lemmatisierung neu starten")
+    else:
+        feminine_bases = feminine_base_map(kwic_hits_lemmatized, FEMININE_OVERRIDES)
+        feminine_bases.write_csv(f"output/{kwic_variant}/feminine_base_map_{kwic_variant}.csv")
+        _map = dict(zip(feminine_bases["feminine"], feminine_bases["base"]))
+        kwic_hits_contexts = kwic_hits_lemmatized.with_columns(
+            pl.col("context_lemmas").list.eval(pl.element().replace(_map))
+        )
+        print(
+            f"Movierte Feminina: {feminine_bases.height:,} Lemmata, "
+            f"{feminine_bases['n_feminine'].sum():,} Tokens zurückgeführt"
+        )
+    return (kwic_hits_contexts,)
 
 
 @app.cell(hide_code=True)
@@ -1155,10 +1466,11 @@ def slice_kwic_hits(kwic_hits_lemmatized, corpus, slice_grid):
 
 
 @app.cell
-def _(Path, corpus, kwic_hits_lemmatized, kwic_variant, pl, slice_grid_picker):
+def _(Path, corpus, kwic_hits_contexts, kwic_variant, pl, slice_grid_picker):
     # add Quartale, Halbjahre and Jahre to the lists, which up to now only have dates
     # lazy: the plan is written to parquet in streaming mode and also used for the counts below
-    kwic_hits_sliced = slice_kwic_hits(kwic_hits_lemmatized, corpus, slice_grid_picker.value)
+    # (kwic_hits_contexts = lemmatized hits, feminine context lemmas reduced to the base form)
+    kwic_hits_sliced = slice_kwic_hits(kwic_hits_contexts, corpus, slice_grid_picker.value)
 
     _path = Path(f"output/{kwic_variant}/kwic_hits_sliced_{kwic_variant}_{slice_grid_picker.value}.parquet")
     _tmp = _path.with_name(_path.stem + ".tmp.parquet")

@@ -89,8 +89,10 @@ def _(kwic_variant, pl, slice_grid):
 
 @app.cell
 def _(kwic_variant, pl, slice_grid):
-    kwic_hits_sliced = pl.read_parquet(f"../01_preprocessing/output/{kwic_variant}/kwic_hits_sliced_{kwic_variant}_{slice_grid}.parquet")
-    kwic_hits_sliced
+    # lazy: with large corpora the hits do not fit into memory comfortably; only the two
+    # aggregations below (hits per row, dominant POS) read them, in streaming mode
+    kwic_hits_sliced = pl.scan_parquet(f"../01_preprocessing/output/{kwic_variant}/kwic_hits_sliced_{kwic_variant}_{slice_grid}.parquet")
+    kwic_hits_sliced.head(100).collect()
     return (kwic_hits_sliced,)
 
 
@@ -407,6 +409,7 @@ def _(kwic_hits_sliced, np, pl, target_slices):
         .group_by(["slice", "target_lemma"])
         .len()
         .rename({"len": "n_hits"})
+        .collect(engine="streaming")
     )
     _row_hits = (
         target_slices
@@ -514,6 +517,8 @@ def _(kwic_hits_sliced, pl, ppmi_positive_indexed):
     # dominant POS per lemma
     # a lemma can carry several tags ("gut" as ADV and ADJ); only the more frequent one is kept
     # deliberately not via .sort().unique(keep="first"), whose order is not guaranteed
+    # the counts per (lemma, POS) are made in streaming mode: the exploded list (one row per
+    # context word of every hit) never exists as a whole; the result is small
     context_pos_dominant = (
         kwic_hits_sliced
         .select(["context_lemmas", "context_pos_tags"])
@@ -521,6 +526,7 @@ def _(kwic_hits_sliced, pl, ppmi_positive_indexed):
         .rename({"context_lemmas": "context_lemma", "context_pos_tags": "pos"})
         .group_by(["context_lemma", "pos"])
         .len()
+        .collect(engine="streaming")
         .group_by("context_lemma")
         .agg(pl.col("pos").sort_by("len", descending=True).first())
     )

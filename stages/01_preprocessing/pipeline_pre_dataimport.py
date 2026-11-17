@@ -375,9 +375,9 @@ def _():
     ## Größenabschätzung
     Die CSV-Datei ist etwa so groß wie die Summe der Textdateien (UTF-8 ist für deutsche Texte kaum größer als ältere Kodierungen, die Bereinigung spart wenige Prozent). Liegt erst ein Teil der Daten vor, wird anhand der mittleren Dateigröße auf `EXPECTED_FILES` hochgerechnet.
 
-    Entscheidend ist nicht die Festplatte, sondern der Arbeitsspeicher: `pipeline_pre_ppmi.py` liest die CSV mit `collect()` vollständig in den Speicher. Zum Vergleich: Die Bundestagsreden umfassen 382 MB. Eine Ausgabe einer Wochenzeitschrift hat grob 0,3 bis 1 MB Text, 96.000 Ausgaben ergäben also **etwa 30 bis 100 GB**. Das ist mehr als 100-mal so viel wie die Reden und für eine einzelne Datei, die am Stück in den Speicher geladen wird, zu groß.
+    Zum Vergleich: Die Bundestagsreden umfassen 382 MB. Eine Ausgabe einer Wochenzeitschrift hat grob 0,3 bis 1 MB Text, 96.000 Ausgaben ergäben also **etwa 30 bis 100 GB**, mehr als 100-mal so viel wie die Reden.
 
-    Deshalb kann die Ausgabe nach Jahr oder Monat aufgeteilt werden. Das Preprocessing kann die Teile dann nacheinander verarbeiten (die KWIC-Treffer sind um Größenordnungen kleiner als die Volltexte). Dafür muss `pipeline_pre_ppmi.py` allerdings angepasst werden (siehe Abschnitt „Anschluss an das Preprocessing“).
+    Für den Arbeitsspeicher spielt die Dateigröße keine Rolle: `pipeline_pre_ppmi.py` liest die Korpusdateien Zeile für Zeile und hält nie das ganze Korpus im Speicher. Die Aufteilung nach Jahr oder Monat ist trotzdem ab etwa 10 GB empfehlenswert, aus praktischen Gründen: Einzelne Jahrgänge lassen sich leichter prüfen, kopieren und ergänzen, und ein abgebrochener Import betrifft nur das laufende Jahr. Das Preprocessing liest alle Teile in ihrer Reihenfolge, als wären sie eine Datei.
     """)
     return
 
@@ -420,10 +420,9 @@ def _(EXPECTED_FILES, files):
     projected_bytes = max(_total, _mean * EXPECTED_FILES)
     _ram = total_ram_bytes()
 
-    # rule of thumb: the whole corpus is held in memory as text, plus working memory
-    # for lemmatization etc.; a single file should stay well below half of the RAM
-    _limit = (_ram / 4) if _ram else 4e9
-    recommended_split = "none" if projected_bytes <= _limit else "year"
+    # pipeline_pre_ppmi.py reads the corpus row by row, so the RAM does not limit the file size;
+    # above ~10 GB, yearly files are recommended for handling (checking, copying, adding years)
+    recommended_split = "none" if projected_bytes <= 10e9 else "year"
 
     _gb = lambda b: f"{b / 1e9:,.2f} GB"
     mo.md(
@@ -435,7 +434,7 @@ def _(EXPECTED_FILES, files):
     | mittlere Größe pro Ausgabe | {_mean / 1e6:,.2f} MB |
     | hochgerechnet auf {EXPECTED_FILES:,} Ausgaben | **{_gb(projected_bytes)}** |
     | Arbeitsspeicher dieses Rechners | {_gb(_ram) if _ram else "unbekannt"} |
-    | Empfehlung | **{"eine Datei" if recommended_split == "none" else "Aufteilung (pro Jahr, bei sehr großen Jahrgängen pro Monat)"}** |
+    | Empfehlung | **{"eine Datei" if recommended_split == "none" else "eine Datei pro Jahr"}** |
     """
     )
     return (recommended_split,)
@@ -768,14 +767,9 @@ def _(import_report, written_files):
 def _():
     mo.md(r"""
     ## Anschluss an das Preprocessing
-    `pipeline_pre_ppmi.py` ist derzeit auf die Bundestagsreden eingestellt. Für die hier erzeugten Dateien sind dort folgende Änderungen nötig:
+    In `pipeline_pre_ppmi.py` unter „Einlesen der Daten“ das Korpus **„Zeitschriften-Ausgaben“** wählen. Es liest `output/corpus_editions.csv` bzw. alle Jahres- oder Monatsdateien (`corpus_editions_2025.csv`, …) in ihrer Reihenfolge. Die IDs werden dabei fortlaufend über alle Dateien vergeben. Rednernamen gibt es nicht, `speaker_names.csv` enthält dann nur die Kopfzeile.
 
-    * **Einlesen:** Dateiname `output/corpus_editions.csv` statt der Reden-CSV, `columns_of_interest = ["date", "text", "facet_1"]`, kein Umbenennen, kein Zusammensetzen der Rednernamen.
-    * **Rednernamen:** Der Abschnitt „Speicherung der Rednernamen“ (`facet_2`) entfällt bzw. muss übersprungen werden; das Postprocessing erwartet dann ggf. eine leere `speaker_names.csv`.
-    * **Aufgeteilte Ausgabe:** Bei Dateien pro Jahr oder Monat sollte die KWIC-Extraktion die Teile nacheinander einlesen (`pl.scan_csv(datei).collect()` pro Teil) und nur die Treffer sammeln, statt den gesamten Korpus auf einmal zu laden. Die späteren Schritte arbeiten nur noch mit den Treffern und sind von der Korpusgröße kaum betroffen. Das Datum für die Zeitscheiben wird bisher per Join über `id` aus `corpus` geholt; bei teilweisem Einlesen muss die `id` über alle Teile eindeutig bleiben (z. B. fortlaufend weiterzählen) oder das Datum direkt in die Treffer geschrieben werden.
-    * **Laufzeit:** Die KWIC-Extraktion durchläuft jedes Token in Python. Bei 30 bis 100 GB Text ist mit vielen Stunden zu rechnen; die Teile lassen sich aber unabhängig voneinander (auch parallel) verarbeiten.
-
-    Alternativ zur CSV wäre Parquet möglich: etwa 3- bis 4-mal kleiner auf der Festplatte und schneller einzulesen, aber nicht mehr mit einem Texteditor lesbar.
+    **Laufzeit:** Die KWIC-Extraktion durchläuft jedes Token in Python. Bei 30 bis 100 GB Text ist mit vielen Stunden zu rechnen. Die Lemmatisierung mit Stanza wächst mit der Zahl der Treffer, nicht mit der Textmenge, und kann nach einem Abbruch fortgesetzt werden.
     """)
     return
 

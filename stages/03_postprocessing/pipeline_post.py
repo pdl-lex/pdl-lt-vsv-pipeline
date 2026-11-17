@@ -991,6 +991,41 @@ def _(anchors, neighbor_ranks, pl):
     return neighbor_ranks_labeled, neighbors
 
 
+@app.cell
+def _(neighbor_ranks_labeled, pl):
+    # check: a label may appear only once per neighbor list (target x slice).
+    # It can collide if an anchor label is itself a lemma in the vocabulary that
+    # is not the chosen anchor variant (e.g. lemma Einsatzkräft -> label
+    # "Einsatzkräfte" while lemma Einsatzkräfte also exists). The frontend and the
+    # summaries key on the label, so such entries would be merged or overwritten.
+    # Only reported here, nothing is changed.
+    _dupes = (
+        neighbor_ranks_labeled.group_by(["entity_id", "time_slice_id", "label"])
+        .agg(pl.col("lemma").unique().sort().alias("lemmas"), pl.len().alias("n"))
+        .filter(pl.col("n") > 1)
+    )
+    label_collisions = (
+        _dupes.group_by("label")
+        .agg(
+            pl.col("lemmas").explode().unique().sort().alias("lemmas"),
+            pl.len().alias("n_lists"),
+        )
+        .with_columns(pl.col("lemmas").list.join(", "))
+        .sort("n_lists", descending=True)
+    )
+
+    if label_collisions.is_empty():
+        print("Keine doppelten Labels in den Nachbarlisten.")
+    else:
+        print(
+            f"{len(label_collisions)} Labels kommen in Nachbarlisten mehrfach vor "
+            f"({len(_dupes)} betroffene Listen). Ursache: Lemmatisierungsvarianten; "
+            "Ankerliste prüfen oder Deduplizierung einbauen."
+        )
+    label_collisions
+    return
+
+
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""

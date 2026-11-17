@@ -1,4 +1,4 @@
-> **Kopie.** Original: `pdl-lt-vsv/docs/SCHEMA.md` (VSV-App), Stand 2026-10-15,
+> **Kopie.** Original: `pdl-lt-vsv/docs/SCHEMA.md` (VSV-App), Stand 2026-11-17,
 > `meta.neighbor_space` Formatversion 1. Änderungen nur im Original vornehmen
 > und dann hierher kopieren.
 
@@ -17,7 +17,7 @@ Zwei Beispiel-Bundles liegen bei:
 
 | Feld | Typ | Zweck |
 |---|---|---|
-| `meta` | object | Name, Beschreibung, optional `source` (Herkunft: Korpus, Zitation, Lizenz — im Explorer als „Quelle" angezeigt), `vector_dim`, optional `eig_p` (PPMI-SVD: Gewichtung der Zeilenvektoren U·S^p), optional `method` (Kurzname des Verfahrens, z.B. „PPMI-SVD“; Statuszeile), Projektionsverfahren, `shift_point`, erklärte Varianz (s.u.), optional `neighbor_space` (Suchraum für Nachbarabfragen, s.u.) |
+| `meta` | object | Name, Beschreibung, optional `source` (Herkunft: Korpus, Zitation, Lizenz — im Explorer als „Quelle" angezeigt), `vector_dim`, optional `eig_p` (PPMI-SVD: Gewichtung der Zeilenvektoren U·S^p), optional `method` (Kurzname des Verfahrens, z.B. „PPMI-SVD“; Statuszeile), Projektionsverfahren, erklärte Varianz (s.u.), optional `neighbor_space` (Suchraum für Nachbarabfragen, s.u.) |
 | `facets_schema` | array | Deklariert die Facetten-Achsen (Publikation, Region, Sprecher …) |
 | `entities` | array | Die Zielwörter (das, was sich über die Zeit bewegt) |
 | `time_slices` | array | Zeitscheiben in Reihenfolge (`index`) |
@@ -70,7 +70,10 @@ ist nicht die Architektur, sondern die Zell-Sparsity (siehe unten).
 ```
 
 - `vector`: der volle Vektor im **gemeinsamen** Raum. Ermöglicht Re-Projektion
-  auf gefilterte Wortauswahlen im Frontend/Backend.
+  auf gefilterte Wortauswahlen im Frontend/Backend. Auf Länge 1 normiert: Die
+  Länge eines Rohvektors spiegelt vor allem die Textmenge der Zelle und trägt
+  keine Bedeutung; diese Information steckt nur in `freq`. Module rechnen mit
+  Richtungen (Kosinus) oder normieren selbst, bevor sie Vektoren mitteln.
 - `coords_3d`: vom Lieferanten vorberechnete gemeinsame PCA – **ein** Basisraum
   für alle Punkte (Aggregate, Records, Anker, übrige Kontextwörter).
   Alignment-frei, weil ein einziger Raum. Gefittet wird auf einer festen
@@ -368,3 +371,7 @@ Nachbarn der vorberechneten Listen ab.
 - **Terminologie:** die realen Vektoren sind später *konstruiert* (PPMI-SVD),
   nicht *trainiert*. Diese Demo-Vektoren sind weder – sie sind synthetische
   Stand-ins, die nur die Raum-Eigenschaften nachbilden.
+- **`meta.shift_point` entfällt.** Früher markierte das Feld eine Zäsur
+  (z. B. `"2022Q1"`), die das Frontend als Hilfslinie zeichnete. Neue Bundles
+  enthalten es nicht mehr; ältere Bundles, die es noch mitliefern, laden
+  weiterhin — das Feld wird ignoriert.

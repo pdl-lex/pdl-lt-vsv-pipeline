@@ -518,7 +518,10 @@ def _(mo):
 def _(context_vectors_unit, context_words, pl):
     # empty label means "show lemma unchanged". Polars reads empty fields as null;
     # coalesce takes the first non-null value, i.e. the lemma here.
-    anchor_list = pl.read_csv("input/anchors.csv").with_columns(
+    # separator from the header line: comma, or semicolon as written by Excel with German settings
+    with open("input/anchors.csv", encoding="utf-8-sig") as _f:
+        _sep = ";" if ";" in _f.readline() else ","
+    anchor_list = pl.read_csv("input/anchors.csv", separator=_sep).with_columns(
         pl.coalesce([pl.col("label"), pl.col("lemma")]).alias("label")
     )
 

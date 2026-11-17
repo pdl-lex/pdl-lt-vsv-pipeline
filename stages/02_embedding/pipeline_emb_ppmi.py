@@ -26,7 +26,7 @@ def _(mo):
     * **Embedding bzw. Vektorisierung (pipeline_emb.py)**
     * Nachbearbeitung und Generierung des Bundles (pipeline_post.py)
 
-    Die hier verwendeten Daten werden aus dem Output-Verzeichnis des Preprocessing-Schritts geladen.
+    Die hier verwendeten Daten werden aus input/[kwic_variant] geladen. Dorthin kopiert sie der Schalter am Ende von pipeline_pre_ppmi.py aus dem Output-Verzeichnis des Preprocessing-Schritts.
 
     Zusätzlich zu diesem Pipeline-Schritt gibt es eine interaktive Demo, die die Funktionsweise von PPMI detailliert erläutert. Diese findet sich im Notebook *pipeline_emb_ppmi_demo.py*.
     """)
@@ -81,7 +81,7 @@ def _():
 def _(kwic_variant, pl, slice_grid):
     # slice as string, otherwise year slices ("2018") are inferred as i64 and don't match the parquet
     cooc_counts = pl.read_csv(
-        f"../01_preprocessing/output/{kwic_variant}/cooc_counts_{kwic_variant}_{slice_grid}.csv",
+        f"input/{kwic_variant}/cooc_counts_{kwic_variant}_{slice_grid}.csv",
         schema_overrides={"slice": pl.Utf8},
     )
     cooc_counts
@@ -92,7 +92,7 @@ def _(kwic_variant, pl, slice_grid):
 def _(kwic_variant, pl, slice_grid):
     # lazy: with large corpora the hits do not fit into memory comfortably; only the two
     # aggregations below (hits per row, dominant POS) read them, in streaming mode
-    kwic_hits_sliced = pl.scan_parquet(f"../01_preprocessing/output/{kwic_variant}/kwic_hits_sliced_{kwic_variant}_{slice_grid}.parquet")
+    kwic_hits_sliced = pl.scan_parquet(f"input/{kwic_variant}/kwic_hits_sliced_{kwic_variant}_{slice_grid}.parquet")
     kwic_hits_sliced.head(100).collect()
     return (kwic_hits_sliced,)
 
@@ -295,7 +295,7 @@ def _(mo):
     ## SVD - Singular Value Decomposition
     In den folgenden Zellen wird die Langform einer SVD unterzogen - die Langform stellt dabei bereits die Matrix dar.
 
-    Bis hierher ist jedes Zielwort in jeder Zeitscheibe durch eine *Liste* von  Kontextwörtern beschrieben. Die SVD macht daraus einen *Vektor*: sie sucht die 100 Achsen, entlang derer sich die Zeilen am stärksten unterscheiden,    und drückt jede Zeile in diesen 100 Koordinaten aus.
+    Bis hierher ist jedes Zielwort in jeder Zeitscheibe durch eine *Liste* von  Kontextwörtern beschrieben. Die SVD macht daraus einen *Vektor*: sie sucht die k Achsen (hier 300), entlang derer sich die Zeilen am stärksten unterscheiden, und drückt jede Zeile in diesen k Koordinaten aus.
     Entscheidend ist, dass das **eine einzige** Zerlegung über alle Zeitscheiben gemeinsam ist. Eine SVD pro Quartal würde 50 zufällig gedrehte Räume liefern, in denen ein Vergleich *zwischen* Quartalen nichts bedeutet.
     """)
     return
@@ -369,20 +369,28 @@ def _(context_words, ppmi_positive, target_slices):
 
 
 @app.cell
-def _(context_words, np, ppmi_positive_indexed, target_slices):
-    # initialize matrix with correct dimensions, shortened to float32
+def _(context_words, ppmi_positive_indexed, target_slices):
+    # sparse matrix (CSR): only the positive PPMI values are stored. A dense matrix would hold
+    # rows x context words values, almost all of them 0; for large corpora it does not fit in memory.
+    from scipy.sparse import csr_matrix
 
-    ppmi_matrix = np.zeros(
-        (len(target_slices), len(context_words)),
-        dtype=np.float32,
+    ppmi_matrix = csr_matrix(
+        (
+            ppmi_positive_indexed["ppmi"].to_numpy(),
+            (
+                ppmi_positive_indexed["target_slice_idx"].to_numpy(),
+                ppmi_positive_indexed["context_idx"].to_numpy(),
+            ),
+        ),
+        shape=(len(target_slices), len(context_words)),
     )
 
-    ppmi_matrix[
-        ppmi_positive_indexed["target_slice_idx"].to_numpy(),
-        ppmi_positive_indexed["context_idx"].to_numpy(),
-    ] = ppmi_positive_indexed["ppmi"].to_numpy()
-
-    print(f"Matrix im Speicher: {ppmi_matrix.nbytes / 1e6:.0f} MB")
+    _cells = ppmi_matrix.shape[0] * ppmi_matrix.shape[1]
+    _bytes = ppmi_matrix.data.nbytes + ppmi_matrix.indices.nbytes + ppmi_matrix.indptr.nbytes
+    print(
+        f"Matrix {ppmi_matrix.shape[0]:,} × {ppmi_matrix.shape[1]:,}, {ppmi_matrix.nnz:,} Werte > 0 "
+        f"({ppmi_matrix.nnz / _cells:.2%}), im Speicher {_bytes / 1e6:.0f} MB (dicht: {_cells * 4 / 1e6:,.0f} MB)"
+    )
     ppmi_matrix
     return (ppmi_matrix,)
 
@@ -426,27 +434,17 @@ def _(kwic_hits_sliced, np, pl, target_slices):
 
 
 @app.cell
-def _(is_fitted, np, ppmi_matrix):
-    # Singular Value Decomposition
-    #  M = U * S * Vt
-    # full_matrices=False: numpy only calculates min(rows, columns) dimensions instead of columns x columns for V
-    # with MIN_HITS_FIT set, only the fitted rows enter the decomposition (U then has only those rows)
-
-    U, S, Vt = np.linalg.svd(ppmi_matrix[is_fitted], full_matrices=False)
-
-    print("U :", U.shape)   # rows in new space
-    print("S :", S.shape)   # relevance of each axis
-    print("Vt:", Vt.shape)  # contextwords, needed for anchors
-    return S, U, Vt
-
-
-@app.cell
 def _(mo):
     mo.md(r"""
     **Auf k Dimensionen kürzen**
 
     Die vollständige SVD ist eine verlustfreie Zerlegung. Die Reduktion entsteht erst durch die Beschränkung auf die
-    k größten Singulärwerte.
+    k größten Singulärwerte; das ist die beste Näherung der Matrix mit Rang k (Eckart & Young 1936). Berechnet
+    werden deshalb nur diese k Singulärwerte und -vektoren (abgeschnittene SVD), direkt an der dünn besetzten Matrix
+    mit dem iterativen Lanczos-Verfahren von ARPACK (`scipy.sparse.linalg.svds`; Lehoucq, Sorensen & Yang 1998).
+    Das Ergebnis ist dasselbe wie das der vollständigen SVD, gekürzt auf k, bis auf Rundungsfehler und das
+    Vorzeichen einzelner Achsen, das bei jeder SVD beliebig ist. Für reproduzierbare Läufe sind der Startvektor
+    fest und die Vorzeichen einheitlich gewählt (der betragsgrößte Eintrag jeder Achse in Vt ist positiv).
     Neben k wird der Exponent p der Eigenwertgewichtung festgelegt (Zeilenvektor = U_k · Σ_k^p; Caron 2001;
     Levy, Goldberg & Dagan 2015). p = 1 gewichtet jede Dimension mit ihrem vollen Singulärwert, kleinere Werte
     verringern das Gewicht der führenden Dimensionen gegenüber den übrigen.
@@ -464,12 +462,44 @@ def _(mo):
 
 
 @app.cell
-def _(MIN_HITS_FIT, S, U, Vt, ppmi_matrix):
+def _():
     # determined with pipeline_emb_ppmi_diagnose.py, section 3 (punkt/halfyear, 2026-11-17); see
     # "internal/Readme Scientific Methodology.md", 1.8
     k = 300
     eig_p = 0.5
+    return eig_p, k
 
+
+@app.cell
+def _(is_fitted, k, np, ppmi_matrix):
+    # truncated Singular Value Decomposition: M ≈ U_k * S_k * Vt_k, only the k largest singular values
+    # with MIN_HITS_FIT set, only the fitted rows enter the decomposition (U then has only those rows)
+    from scipy.sparse.linalg import svds
+
+    _fit = ppmi_matrix[np.flatnonzero(is_fitted)]
+    if k < min(_fit.shape):
+        # ARPACK; random_state fixes the start vector, so repeated runs give the same result
+        U, S, Vt = svds(_fit, k=k, random_state=0)
+        _order = np.argsort(S)[::-1]  # svds returns the singular values in ascending order
+        U, S, Vt = U[:, _order], S[_order], Vt[_order]
+    else:
+        # very small matrix (fewer rows or columns than k): full SVD, all dimensions are kept
+        print(f"k = {k} ≥ min{_fit.shape}: vollständige SVD, {min(_fit.shape)} Dimensionen")
+        U, S, Vt = np.linalg.svd(_fit.toarray(), full_matrices=False)
+
+    # sign convention: the largest entry (by absolute value) of every axis of Vt is positive;
+    # the sign of a singular vector pair is arbitrary, cosines do not depend on it
+    _sign = np.sign(Vt[np.arange(len(S)), np.abs(Vt).argmax(axis=1)])
+    U, Vt = U * _sign, Vt * _sign[:, None]
+
+    print("U :", U.shape)   # rows in new space
+    print("S :", S.shape)   # relevance of each axis
+    print("Vt:", Vt.shape)  # contextwords, needed for anchors
+    return S, U, Vt
+
+
+@app.cell
+def _(MIN_HITS_FIT, S, U, Vt, eig_p, k, np, ppmi_matrix):
     # row vector = U_k * S_k**p (eigenvalue weighting, Caron 2001)
     # p = 1 weights each dimension by its full singular value; p = 0.5 reduces the weight
     # of the leading dimensions relative to the others
@@ -478,7 +508,8 @@ def _(MIN_HITS_FIT, S, U, Vt, ppmi_matrix):
     else:
         # folding-in for all rows: m V_k S_k**(p-1); identical to U_k S_k**p for the fitted rows
         target_slice_vectors = (ppmi_matrix @ Vt[:k].T) * S[:k] ** (eig_p - 1)
-    return eig_p, k, target_slice_vectors
+    target_slice_vectors = np.asarray(target_slice_vectors, dtype=np.float32)
+    return (target_slice_vectors,)
 
 
 @app.cell(hide_code=True)
@@ -498,27 +529,19 @@ def _(mo):
 
 
 @app.function
-def fold_in(rows, cols, values, n_rows, context_vectors, singular_values, eig_p, chunk=100_000):
+def fold_in(rows, cols, values, n_rows, context_vectors, singular_values, eig_p):
     """
     Folding-in of sparse PPMI rows into the SVD space: row vector = m V_k S_k^(p-1).
 
     rows, cols, values: the nonzero entries (row index, column index = context_idx, PPMI);
     context_vectors: V_k (one row per context word, k columns); singular_values: S[:k].
-    Works on the entries in chunks, so no dense rows x contexts matrix is built.
+    The rows are built as a sparse matrix, so no dense rows x contexts matrix is needed.
     """
     import numpy as np
+    from scipy.sparse import csr_matrix
 
-    order = np.argsort(rows, kind="stable")
-    rows, cols, values = rows[order], cols[order], values[order]
-    out = np.zeros((n_rows, context_vectors.shape[1]), dtype=np.float64)
-    for start in range(0, len(rows), chunk):
-        r = rows[start : start + chunk]
-        contrib = values[start : start + chunk, None] * context_vectors[cols[start : start + chunk]]
-        # rows are sorted: sum each run of equal rows, then add to the output (a row can continue
-        # in the next chunk, it is then added twice, which is correct)
-        bounds = np.flatnonzero(np.r_[True, r[1:] != r[:-1]])
-        out[r[bounds]] += np.add.reduceat(contrib, bounds, axis=0)
-    return (out * singular_values.astype(np.float64) ** (eig_p - 1)).astype(np.float32)
+    m = csr_matrix((values, (rows, cols)), shape=(n_rows, context_vectors.shape[0]))
+    return np.asarray((m @ context_vectors) * singular_values ** (eig_p - 1), dtype=np.float32)
 
 
 @app.cell
@@ -545,12 +568,12 @@ def _(kwic_variant, pl, slice_grid):
     import json as _json
 
     # declaration of the facets (pipeline_pre_ppmi.py); empty list = corpus without facets
-    with open(f"../01_preprocessing/output/{kwic_variant}/facets_{kwic_variant}_{slice_grid}.json", encoding="utf-8") as _fh:
+    with open(f"input/{kwic_variant}/facets_{kwic_variant}_{slice_grid}.json", encoding="utf-8") as _fh:
         facets_declaration = _json.load(_fh)
     facet_columns = [_f["column"] for _f in facets_declaration["facets"]]
 
     cooc_counts_facets = (
-        pl.read_parquet(f"../01_preprocessing/output/{kwic_variant}/cooc_counts_facets_{kwic_variant}_{slice_grid}.parquet")
+        pl.read_parquet(f"input/{kwic_variant}/cooc_counts_facets_{kwic_variant}_{slice_grid}.parquet")
         if facet_columns
         else None
     )
@@ -668,7 +691,7 @@ def _(mo):
     * Metadaten
      * **emb_meta_[kwic_variant]_[slice_grid].json**: Quelldatei, Zeitraster, k, p, der Frobenius-Anteil, die Mindesttrefferzahl für die SVD (min_hits_fit, null = alle Zeilen), die Zahl der Zeilen in der SVD, die Facetten-Deklaration aus dem Preprocessing (facets) und die Bezugsgrößen der records (record_marginals)
 
-    U, S und die vollständige Vt werden nicht gespeichert. Insbesondere Vt wäre mit (Zeilen × Kontextwörter) sehr groß, genutzt werden aber nur die ersten k Zeilen.
+    U, S und Vt werden nicht gespeichert; aus der abgeschnittenen SVD gehen nur die Zeilen- und Kontextwortvektoren in die Ausgabe ein.
     """)
     return
 
@@ -735,7 +758,7 @@ def _(
 
     # context word vectors from the column side of the SVD, one row per context word
     # unweighted, i.e. without S**eig_p (open question, see "internal/Readme Scientific Methodology.md", 1.9)
-    context_vectors = Vt[:k].T
+    context_vectors = Vt[:k].T.astype(np.float32)
 
     # joins give no order guarantee, so restore matrix order explicitly
     # is_fitted: row took part in the SVD (false only with MIN_HITS_FIT set, see above)
@@ -828,16 +851,19 @@ def _(mo):
 
 
 @app.cell
-def _(S, k, target_slice_vectors):
+def _(S, is_fitted, k, np, ppmi_matrix, target_slice_vectors):
     # Fraction of the squared Frobenius norm retained by the rank-k approximation:
     #   ||M_k||_F^2 / ||M||_F^2  =  sum(S[:k]**2) / sum(S**2)
     # ||M||_F^2 is the sum of all squared entries of M (here: the PPMI matrix
-    # passed to the SVD). Equivalently: 1 - relative squared reconstruction error.
+    # passed to the SVD), equal to the sum of all squared singular values; it is
+    # computed from the entries, because the truncated SVD only yields the first k.
+    # Equivalently: 1 - relative squared reconstruction error.
     # Not "explained variance": the PPMI matrix is not mean-centered, so the
     # first singular value largely reflects the overall mean of the rows.
     # Describes compression within one run; comparable across runs only if the
     # input matrix is constructed the same way.
-    retained_frobenius_sq = (S[:k] ** 2).sum() / (S ** 2).sum()
+    _fit = ppmi_matrix[np.flatnonzero(is_fitted)]
+    retained_frobenius_sq = (S[:k] ** 2).sum() / _fit.power(2).sum()
 
     print(f"k = {k}, target_slice_vectors: {target_slice_vectors.shape}")
     print(f"retained fraction of squared Frobenius norm: {retained_frobenius_sq:.1%}")

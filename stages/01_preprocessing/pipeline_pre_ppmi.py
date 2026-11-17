@@ -303,9 +303,10 @@ def _(corpus, pl, speaker_facet):
             .collect()
         )
 
-    speaker_names.write_csv("output/speaker_names.csv")
+    speaker_names_path = "output/speaker_names.csv"
+    speaker_names.write_csv(speaker_names_path)
     print(f"{len(speaker_names):,} Namensbestandteile gespeichert")
-    return
+    return (speaker_names_path,)
 
 
 @app.cell(hide_code=True)
@@ -1634,9 +1635,36 @@ def _(
         print(f"Gespeichert: {_facets_path}")
     else:
         _facets_path.unlink(missing_ok=True)
+
+    # labels and further attributes of the facet values (optional): input/facet_values_<facet id>.csv,
+    # separator ";", UTF-8, column "id" = value in the corpus, "label" = display name, any further
+    # columns (e.g. "ausrichtung") are passed on to facets_schema; values without entry keep label = id
+    import csv as _csv
+
+    def _with_attributes(facet):
+        _table = Path(f"input/facet_values_{facet['id']}.csv")
+        _attrs = {}
+        if _table.is_file():
+            with open(_table, encoding="utf-8-sig", newline="") as _fh:
+                for _row in _csv.DictReader(_fh, delimiter=";"):
+                    _id = (_row.pop("id") or "").strip()
+                    if _id:
+                        _attrs[_id] = {_c: _v.strip() for _c, _v in _row.items() if _v and _v.strip()}
+        _values = [{**_attrs.get(_v["id"], {}), **_v} for _v in facet_values[facet["column"]]]
+        _found = {_v["id"] for _v in _values}
+        _missing = sorted(_found - set(_attrs) - {MISSING_FACET_VALUE})
+        _unused = sorted(set(_attrs) - _found)
+        if _table.is_file():
+            print(f"{_table}: {len(_attrs)} Einträge")
+            if _missing:
+                print(f"  im Korpus, nicht in der Tabelle (Bezeichnung = ID): {', '.join(_missing)}")
+            if _unused:
+                print(f"  in der Tabelle, ohne Treffer im Korpus: {', '.join(_unused)}")
+        return {**facet, "values": _values}
+
     _declaration = {
         "missing_value": MISSING_FACET_VALUE,
-        "facets": [{**_f, "values": facet_values[_f["column"]]} for _f in bundle_facets],
+        "facets": [_with_attributes(_f) for _f in bundle_facets],
     }
     with open(f"output/{kwic_variant}/facets_{_name}.json", "w", encoding="utf-8") as _fh:
         _json.dump(_declaration, _fh, ensure_ascii=False, indent=2)
@@ -1686,26 +1714,29 @@ def _(mo):
 def _(mo):
     copy_switch = mo.ui.switch(
         value=True,
-        label="Nach 02_embedding/input kopieren (sonst nur output/)",
+        label="Nach 02_embedding/input kopieren, speaker_names.csv nach 03_postprocessing/input (sonst nur output/)",
     )
     copy_switch
     return (copy_switch,)
 
 
 @app.cell
-def _(Path, copy_switch, kwic_variant, pre_output_files):
+def _(Path, copy_switch, kwic_variant, pre_output_files, speaker_names_path):
     # copy to the input of the next stage
     # output/ is this stage's workbench, ../02_embedding/input/<kwic_variant>/ is what
     # pipeline_emb_ppmi.py works on. The files of the current run (kwic_variant,
-    # slice_grid) are copied.
+    # slice_grid) are copied. speaker_names.csv is only read by pipeline_post.py and
+    # goes straight to ../03_postprocessing/input/.
     import shutil
 
     if copy_switch.value:
         _next_dir = Path(f"../02_embedding/input/{kwic_variant}")
         _next_dir.mkdir(parents=True, exist_ok=True)
-        for _src in pre_output_files:
-            shutil.copy2(_src, _next_dir / Path(_src).name)
-            print(f"kopiert nach {_next_dir / Path(_src).name}")
+        _targets = [(_src, _next_dir) for _src in pre_output_files]
+        _targets.append((speaker_names_path, Path("../03_postprocessing/input")))
+        for _src, _dir in _targets:
+            shutil.copy2(_src, _dir / Path(_src).name)
+            print(f"kopiert nach {_dir / Path(_src).name}")
     else:
         print("nicht kopiert (Schalter aus) - liegt nur in output/")
     return

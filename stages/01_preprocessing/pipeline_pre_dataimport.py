@@ -275,18 +275,21 @@ def _():
 @app.cell(hide_code=True)
 def _():
     mo.md(r"""
-    Optional lassen sich die Schlüssel auf Anzeigenamen abbilden, z. B. wenn dieselbe Publikation unter verschiedenen Schreibweisen vorkommt (`spiegel`, `der_spiegel`). Schlüssel ohne Eintrag bleiben unverändert. Die Übersicht weiter unten zeigt alle gefundenen Schlüssel.
+    Der Schlüssel wird als Facettenwert (`facet_1`) geschrieben und ist die ID der Publikation im Bundle. Kommt dieselbe Publikation unter verschiedenen Schreibweisen vor (`der_spiegel`, `spiegel`), bildet `MAGAZINE_NAMES` die Varianten auf eine ID ab. Schlüssel ohne Eintrag bleiben unverändert.
+
+    Die Anzeigenamen stehen nicht hier, sondern in `input/facet_values_publication.csv` (Spalten `id;label`, weitere Spalten möglich). Das Preprocessing übernimmt sie in das Bundle. Die IDs dieser Tabelle sind das Ziel der Abbildung. Die Übersicht weiter unten zeigt alle gefundenen IDs und ob sie in der Tabelle stehen.
     """)
     return
 
 
 @app.cell
 def _():
-    # lower-case key from the file name -> name used as facet value
+    # lower-case key from the file name -> publication ID (facet value, column id of
+    # input/facet_values_publication.csv); only needed where the key differs from the ID
     MAGAZINE_NAMES = {
-        # "spiegel": "Der Spiegel",
-        # "der_spiegel": "Der Spiegel",
-        # "die_zeit": "Die Zeit",
+        # "der_spiegel": "spiegel",
+        # "die_zeit": "zeit",
+        # "süddeutsche_zeitung": "sz",
     }
     return (MAGAZINE_NAMES,)
 
@@ -357,7 +360,13 @@ def _(files):
 
 @app.cell
 def _(files):
-    # overview per publication: check for spelling variants that should be merged in MAGAZINE_NAMES
+    # overview per publication: check for spelling variants that should be merged in MAGAZINE_NAMES,
+    # and whether the ID has a display name in input/facet_values_publication.csv
+    _table = BASE_DIR / "input" / "facet_values_publication.csv"
+    _known = []
+    if _table.is_file():
+        with open(_table, encoding="utf-8-sig", newline="") as _fh:
+            _known = [_row["id"].strip() for _row in csv.DictReader(_fh, delimiter=";") if _row.get("id")]
     (
         files.filter(pl.col("date").is_not_null())
         .group_by("magazine")
@@ -368,6 +377,7 @@ def _(files):
             pl.col("date_source").unique().sort().str.join(", ").alias("date_source"),
             (pl.col("bytes").sum() / 1e6).round(1).alias("MB"),
         )
+        .with_columns(pl.col("magazine").is_in(_known).alias("in_facet_values"))
         .sort("magazine")
     )
     return

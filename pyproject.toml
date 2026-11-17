@@ -15,4 +15,6 @@ dependencies = [
     "stanza>=1.14.0",
     # encoding detection in pipeline_pre_dataimport.py (before only a transitive dependency)
     "charset-normalizer>=3.4",
+    # sparse PPMI matrix and truncated SVD in pipeline_emb_ppmi.py (before only a transitive dependency)
+    "scipy>=1.13",
 ]

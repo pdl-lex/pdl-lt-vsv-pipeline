@@ -93,7 +93,7 @@ def _(mo):
 def _(mo):
     mo.md(r"""
     ## Input
-    Geladen werden die Daten aus stages/02_embedding/output/[kwic_variant].
+    Geladen werden die Daten aus input/[kwic_variant]. Dorthin kopiert sie der Schalter am Ende von pipeline_emb_ppmi.py aus stages/02_embedding/output/[kwic_variant]; speaker_names.csv kopiert pipeline_pre_ppmi.py nach input/.
     Pro KWIC-Variante und Slice existieren fünf Dateien:
     * Zielwörter
      * **target_slice_vectors_[kwic_variant]_[slice_grid].npy**: Zielwortvektoren pro Zeitscheibe (Zeile i gehört zu target_slice_idx in  target_slices.parquet)
@@ -127,7 +127,7 @@ def _(kwic_variant, np, slice_grid):
     # target_slice_vectors.npy (target words per slice)
     # one row per target word and slice, row i belongs to target_slice_idx in target_slices
 
-    target_slice_vectors = np.load(f"../02_embedding/output/{kwic_variant}/target_slice_vectors_{kwic_variant}_{slice_grid}.npy")
+    target_slice_vectors = np.load(f"input/{kwic_variant}/target_slice_vectors_{kwic_variant}_{slice_grid}.npy")
 
     print(f"Die Vektor-Matrix der Zielwörter hat {target_slice_vectors.shape[1]} Spalten, definiert durch den Wert von k im Embedding-Schritt. Sie hat {target_slice_vectors.shape[0]} Zeilen. Das entspricht Zielwörter x Jahre (13) x Scheibengröße abzüglich nicht belegter Scheiben.")
 
@@ -140,7 +140,7 @@ def _(kwic_variant, np, slice_grid):
     # context_vectors.npy (context words)
     # one row per context word (column side of the SVD), row j belongs to context_idx in context_words_emb
 
-    context_vectors = np.load(f"../02_embedding/output/{kwic_variant}/context_vectors_{kwic_variant}_{slice_grid}.npy")
+    context_vectors = np.load(f"input/{kwic_variant}/context_vectors_{kwic_variant}_{slice_grid}.npy")
 
     print(f"Die Vektor-Matrix der Kontextwörter hat {context_vectors.shape[1]} Spalten, definiert durch den Wert von k im Embedding-Schritt. Sie hat {context_vectors.shape[0]} Zeilen: eine je Kontextwort-Lemma, das in mindestens einer Zelle (Zielwort × Zeitscheibe) einen PPMI-Wert > 0 hat. Das entspricht den Spalten der PPMI-Matrix.")
 
@@ -154,7 +154,7 @@ def _(kwic_variant, pl, slice_grid):
     # target_slices
     # target_slice_idx, target_lemma, slice, n_hits
 
-    target_slices = pl.read_parquet(f"../02_embedding/output/{kwic_variant}/target_slices_{kwic_variant}_{slice_grid}.parquet")
+    target_slices = pl.read_parquet(f"input/{kwic_variant}/target_slices_{kwic_variant}_{slice_grid}.parquet")
 
     print(f"Die Tabelle 'target_slices' hat {target_slices.shape[1]} Spalten: Index, Lemma, Slice und Frequenz. Sie hat {target_slices.shape[0]} Zeilen:  Das entspricht Zielwörter x Jahre (13) x Scheibengröße abzüglich nicht belegter Scheiben. Der Index 'row i' passt zum Index von vectors (gleiche Zeilenzahl).")
 
@@ -169,7 +169,7 @@ def _(kwic_variant, pl, slice_grid):
     # context_words_emb
     # context_idx, context_lemma, n_target_slices, n_cooc, pos
 
-    context_words_emb = pl.read_parquet(f"../02_embedding/output/{kwic_variant}/context_words_{kwic_variant}_{slice_grid}.parquet")
+    context_words_emb = pl.read_parquet(f"input/{kwic_variant}/context_words_{kwic_variant}_{slice_grid}.parquet")
 
     print(f"Die Tabelle 'context_words_emb' hat {context_words_emb.shape[1]} Spalten: Index, Kontext-Lemma, Anzahl der belegten Zellen, Anzahl der Vorkommen in den belegten Zellen, und POS. Sie hat {context_words_emb.shape[0]} Zeilen: eine je Kontextwort-Lemma, das in mindestens einer Zelle (Zielwort × Zeitscheibe) einen PPMI-Wert > 0 hat. Der Index 'column j' passt zum Index von context_vectors (gleiche Zeilenzahl). \n\nDer PPMI-Wert ist nur dann >0, wenn das Vorkommen häufiger ist als erwartet. Ein Kontextwort kanna lso durchaus häufiger auftauchen, wird aber nur gewertet, wenn das Vorkommen wahrscheinlich ist als zu erwarten war.\n\nn_occurrences ist immer gleich oder größer als n_target_slices. Mehrfach gezählt wird ein Kontextwort in drei Fällen: 1) Das Wort steht in mehreren KWIC-Kontexten derselben Zelle. 2) Das Wort steht mehrmals im selben Kontext. 3) Ein Satz enthält zwei Zielwörter. Dann gibt es zwei KWIC-Zeilen, und der Kontext wird für beide Zielwörter gezählt." )
 
@@ -182,7 +182,7 @@ def _(json, kwic_variant, slice_grid):
     # Meta Data
     # emb_meta.json
 
-    with open(f"../02_embedding/output/{kwic_variant}/emb_meta_{kwic_variant}_{slice_grid}.json", encoding="utf-8") as _f:
+    with open(f"input/{kwic_variant}/emb_meta_{kwic_variant}_{slice_grid}.json", encoding="utf-8") as _f:
         emb_meta = json.load(_f)
 
     # _ to avoid double import
@@ -196,8 +196,8 @@ def _(json, kwic_variant, slice_grid):
 def _(kwic_variant, np, pl, slice_grid):
     # facet cells (records): one row per target word, slice and facet value, vectors by folding-in
     # into the space of the aggregates (see pipeline_emb_ppmi.py, "Facetten-Zellen"); empty without facets
-    record_vectors = np.load(f"../02_embedding/output/{kwic_variant}/record_vectors_{kwic_variant}_{slice_grid}.npy")
-    records = pl.read_parquet(f"../02_embedding/output/{kwic_variant}/records_{kwic_variant}_{slice_grid}.parquet")
+    record_vectors = np.load(f"input/{kwic_variant}/record_vectors_{kwic_variant}_{slice_grid}.npy")
+    records = pl.read_parquet(f"input/{kwic_variant}/records_{kwic_variant}_{slice_grid}.parquet")
     assert (records["record_idx"].to_numpy() == np.arange(record_vectors.shape[0])).all()
     records
     return record_vectors, records
@@ -448,8 +448,10 @@ def _(
             "id": _f["id"],
             "label": _f["label"],
             "type": "categorical",
-            # value id = value in the corpus; n_hits is not in the schema, but facet values are .passthrough()
-            "values": [{"id": _v["id"], "label": _v["id"], "n_hits": _v["n_hits"]} for _v in _f["values"]],
+            # value id = value in the corpus; label and further attributes (e.g. "ausrichtung") from
+            # input/facet_values_<facet>.csv of the preprocessing, label = id if not listed there;
+            # n_hits and further attributes are not in the schema, but facet values are .passthrough()
+            "values": [{"label": _v["id"], **_v} for _v in _f["values"]],
         }
         for _f in emb_meta["facets"]
     ]
@@ -503,7 +505,7 @@ def _(pl):
     # names of the persons speaking in the corpus, exported by pipeline_pre_ppmi.py.
     # More precise than NER and without another NLP run, because it is an exact
     # list of real persons. Does not cover names of persons who are not speakers.
-    speaker_names = pl.read_csv("../01_preprocessing/output/speaker_names.csv")["name"]
+    speaker_names = pl.read_csv("input/speaker_names.csv")["name"]
     return (speaker_names,)
 
 

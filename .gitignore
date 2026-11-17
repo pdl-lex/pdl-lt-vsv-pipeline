@@ -7,6 +7,7 @@ internal
 stages/01_preprocessing/input/*
 !stages/01_preprocessing/input/target_forms.csv
 !stages/01_preprocessing/input/target_lemmas.csv
+!stages/01_preprocessing/input/facet_values_*.csv
 stages/01_preprocessing/output/somajo
 stages/01_preprocessing/output/window40
 *diagnose_alt.py

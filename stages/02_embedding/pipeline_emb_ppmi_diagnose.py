@@ -53,7 +53,7 @@ def _(mo):
 
     Die Belegliste wird an Stelle der Kookkurrenzdatei verwendet, weil die folgenden Prüfungen die Belege nach Reden aufteilen und einzelne Belege ziehen. Die Kookkurrenzdatei enthält nur Summen je Zeitscheibe. Zur Kontrolle vergleicht der Code die eigene Zählung mit der Kookkurrenzdatei aus pre. Weichen die beiden voneinander ab, bricht das Notebook ab.
 
-    Rang k der SVD und Exponent p der Eigenwertgewichtung werden aus den Metadaten des letzten Laufs von emb gelesen (`emb_meta_<Variante>_<Raster>.json`), damit die Diagnose dieselben Werte verwendet wie die Pipeline.
+    Rang k der SVD und Exponent p der Eigenwertgewichtung werden aus den Metadaten des letzten Laufs von emb gelesen (`emb_meta_<Projekt>_<Variante>_<Raster>.json`), damit die Diagnose dieselben Werte verwendet wie die Pipeline.
 
     Begriffe wie in emb: Eine **Zeile** der Matrix ist ein Paar aus Zielwort und Zeitscheibe, z. B. „Sicherheit, 2022-H1“. Ein **Kontextwort** ist eine Spalte der Matrix. Die **Trefferzahl** einer Zeile ist die Zahl ihrer Belege (`n_hits` in emb).
     """)
@@ -63,20 +63,23 @@ def _(mo):
 @app.cell
 def _(json, mo, np, pl, sp):
     # input selection, same naming as in pipeline_emb_ppmi.py
+    PROJECT = "bundestag"
     KWIC_VARIANT = "punkt"
     SLICE_GRID = "halfyear"
+    _run = f"{PROJECT}_{KWIC_VARIANT}_{SLICE_GRID}"
 
-    _pre = mo.notebook_dir() / ".." / "01_preprocessing" / "output" / KWIC_VARIANT
+    # the same files as pipeline_emb_ppmi.py reads (input/), and its results (output/)
+    _pre = mo.notebook_dir() / "input" / KWIC_VARIANT
     _emb = mo.notebook_dir() / "output" / KWIC_VARIANT
 
     # k and p as used in the last run of emb
-    _meta = json.loads((_emb / f"emb_meta_{KWIC_VARIANT}_{SLICE_GRID}.json").read_text(encoding="utf-8"))
+    _meta = json.loads((_emb / f"emb_meta_{_run}.json").read_text(encoding="utf-8"))
     SVD_K = int(_meta["k"])
     SVD_P = float(_meta["eig_p"])
 
     # one row per KWIC hit; h = hit index
     hits = (
-        pl.read_parquet(_pre / f"kwic_hits_sliced_{KWIC_VARIANT}_{SLICE_GRID}.parquet")
+        pl.read_parquet(_pre / f"kwic_hits_sliced_{_run}.parquet")
         .select(["id", "slice", "target_lemma", "context_lemmas"])
         .with_row_index("h")
     )
@@ -94,7 +97,7 @@ def _(json, mo, np, pl, sp):
     _keys = ["slice", "target_lemma", "context_lemma"]
     _own = _tokens.group_by(_keys).len().rename({"len": "n_cooc"})
     _pre_counts = pl.read_csv(
-        _pre / f"cooc_counts_{KWIC_VARIANT}_{SLICE_GRID}.csv",
+        _pre / f"cooc_counts_{_run}.csv",
         schema_overrides={"slice": pl.Utf8, "context_lemma": pl.Utf8},
     )
     _mismatch = (
@@ -106,7 +109,7 @@ def _(json, mo, np, pl, sp):
         mo.callout(
             mo.md(
                 f"**Abbruch:** {_mismatch.height} Zählungen weichen von "
-                f"`cooc_counts_{KWIC_VARIANT}_{SLICE_GRID}.csv` ab. Belegliste und Kookkurrenzdatei "
+                f"`cooc_counts_{_run}.csv` ab. Belegliste und Kookkurrenzdatei "
                 "stammen nicht aus demselben Lauf von pre."
             ),
             kind="danger",
@@ -146,12 +149,12 @@ def _(json, mo, np, pl, sp):
         return f"{n:,}".replace(",", ".")
 
     mo.md(
-        f"Variante `{KWIC_VARIANT}`, Raster `{SLICE_GRID}`. "
+        f"Projekt `{PROJECT}`, Variante `{KWIC_VARIANT}`, Raster `{SLICE_GRID}`. "
         f"Belege: {_de(hits.height)} aus {_de(hits['id'].n_unique())} Reden. "
         f"Matrix: {_de(n_rows)} Zeilen ({rows['target_lemma'].n_unique()} Zielwörter × "
         f"{len(slice_labels)} Zeitscheiben, nicht jede Kombination belegt), {_de(n_columns)} Kontextwörter. "
         f"SVD aus emb: k = {SVD_K}, p = {SVD_P:g}. "
-        f"Die Zählungen stimmen mit `cooc_counts_{KWIC_VARIANT}_{SLICE_GRID}.csv` überein."
+        f"Die Zählungen stimmen mit `cooc_counts_{_run}.csv` überein."
     )
     return (
         SVD_K,

@@ -40,9 +40,9 @@ def _(mo):
 
     Von den im Pre-Processing erzeugten Daten werden nur die folgenden benötigt:
 
-    * **kwic_hits_sliced_[kwic_variant]_[slice_grid].parquet: Pro Zeitscheibe aggregierte Version der lemmatisierten KWIC.
-    * cooc_counts_[kwic_variant]_[slice_grid]: Kookkurenzen für Slice x Zielwort x Kontextwort.
-    * facets_[kwic_variant]_[slice_grid].json und cooc_counts_facets_[kwic_variant]_[slice_grid].parquet: Deklaration der Facetten und die Kookkurrenzen je Facettenwert, für die Facetten-Zellen (records).
+    * kwic_hits_sliced_[projekt]_[kwic_variant]_[slice_grid].parquet: die lemmatisierten KWIC-Treffer mit Zeitscheibe.
+    * cooc_counts_[projekt]_[kwic_variant]_[slice_grid].csv: Kookkurenzen für Slice x Zielwort x Kontextwort.
+    * corpus_meta_[projekt]_[kwic_variant]_[slice_grid].json und cooc_counts_facets_[projekt]_[kwic_variant]_[slice_grid].parquet: Projekt (Name, Quelle), Deklaration der Facetten und die Kookkurrenzen je Facettenwert, für die Facetten-Zellen (records).
 
     Folgende Varianten stehen zur Verfügung:
 
@@ -54,7 +54,7 @@ def _(mo):
     * Zeitscheibengröße Halbjahre: "halfyear"
     * Zeitscheibengröße Quartale: "quarter"
 
-    Standardmäßg werden im folgenden die Daten für "punkt" und "halfyear" verarbeitet, also die Kookkurenzen mit Stanza-Punkt-Lemmatisierung und halbjährlicher Auflösung. In der folgenden Zelle können diese Variablen angepasst werden.
+    Standardmäßg werden im folgenden die Daten des Projekts "bundestag" für "punkt" und "halfyear" verarbeitet, also die Kookkurenzen mit Stanza-Punkt-Lemmatisierung und halbjährlicher Auflösung. In der folgenden Zelle können diese Variablen angepasst werden; die Projekt-ID ist dieselbe wie im Preprocessing (Abschnitt „Projekt“). Die Ausgaben landen in output/[kwic_variant]/, mit Projekt, Variante und Raster im Dateinamen.
     """)
     return
 
@@ -70,29 +70,35 @@ def _(mo):
 
 @app.cell
 def _():
-    # input selection, same naming as the output files of pipeline_pre.py
-    # both values are passed on to pipeline_post.py via output/emb_meta.json
+    # input selection, same naming as the output files of pipeline_pre_ppmi.py
+    # all three values are passed on to pipeline_post.py via emb_meta_<run_name>.json
+    project = "bundestag"
     kwic_variant = "punkt"
     slice_grid = "halfyear"
-    return kwic_variant, slice_grid
+
+    from pathlib import Path
+
+    # read from input/<kwic_variant>/, write to output/<kwic_variant>/ (one folder per method);
+    # run_name = <project>_<kwic_variant>_<slice_grid> is part of every file name
+    in_dir = Path(f"input/{kwic_variant}")
+    out_dir = Path(f"output/{kwic_variant}")
+    run_name = f"{project}_{kwic_variant}_{slice_grid}"
+    return Path, in_dir, kwic_variant, out_dir, project, run_name, slice_grid
 
 
 @app.cell
-def _(kwic_variant, pl, slice_grid):
+def _(in_dir, pl, run_name):
     # slice as string, otherwise year slices ("2018") are inferred as i64 and don't match the parquet
-    cooc_counts = pl.read_csv(
-        f"input/{kwic_variant}/cooc_counts_{kwic_variant}_{slice_grid}.csv",
-        schema_overrides={"slice": pl.Utf8},
-    )
+    cooc_counts = pl.read_csv(in_dir / f"cooc_counts_{run_name}.csv", schema_overrides={"slice": pl.Utf8})
     cooc_counts
     return (cooc_counts,)
 
 
 @app.cell
-def _(kwic_variant, pl, slice_grid):
+def _(in_dir, pl, run_name):
     # lazy: with large corpora the hits do not fit into memory comfortably; only the two
     # aggregations below (hits per row, dominant POS) read them, in streaming mode
-    kwic_hits_sliced = pl.scan_parquet(f"input/{kwic_variant}/kwic_hits_sliced_{kwic_variant}_{slice_grid}.parquet")
+    kwic_hits_sliced = pl.scan_parquet(in_dir / f"kwic_hits_sliced_{run_name}.parquet")
     kwic_hits_sliced.head(100).collect()
     return (kwic_hits_sliced,)
 
@@ -564,22 +570,25 @@ def _(S, Vt, eig_p, k, np, ppmi_positive_indexed, target_slice_vectors):
 
 
 @app.cell
-def _(kwic_variant, pl, slice_grid):
+def _(in_dir, kwic_variant, pl, project, run_name, slice_grid):
     import json as _json
 
-    # declaration of the facets (pipeline_pre_ppmi.py); empty list = corpus without facets
-    with open(f"input/{kwic_variant}/facets_{kwic_variant}_{slice_grid}.json", encoding="utf-8") as _fh:
-        facets_declaration = _json.load(_fh)
-    facet_columns = [_f["column"] for _f in facets_declaration["facets"]]
+    # corpus metadata of pipeline_pre_ppmi.py: project (name, source) and the declaration of the
+    # facets; empty facet list = corpus without facets
+    with open(in_dir / f"corpus_meta_{run_name}.json", encoding="utf-8") as _fh:
+        corpus_meta = _json.load(_fh)
+    assert (corpus_meta["project"], corpus_meta["kwic_variant"], corpus_meta["slice_grid"]) == (
+        project,
+        kwic_variant,
+        slice_grid,
+    ), "corpus_meta passt nicht zu den Einstellungen oben"
+    facet_columns = [_f["column"] for _f in corpus_meta["facets"]]
 
-    cooc_counts_facets = (
-        pl.read_parquet(f"input/{kwic_variant}/cooc_counts_facets_{kwic_variant}_{slice_grid}.parquet")
-        if facet_columns
-        else None
-    )
-    print(f"Facetten: {', '.join(_f['label'] for _f in facets_declaration['facets']) or 'keine'}")
+    cooc_counts_facets = pl.read_parquet(in_dir / f"cooc_counts_facets_{run_name}.parquet") if facet_columns else None
+    print(f"Projekt {project}: {corpus_meta['name']}")
+    print(f"Facetten: {', '.join(_f['label'] for _f in corpus_meta['facets']) or 'keine'}")
     cooc_counts_facets
-    return cooc_counts_facets, facet_columns, facets_declaration
+    return cooc_counts_facets, corpus_meta, facet_columns
 
 
 @app.cell
@@ -676,20 +685,20 @@ def _(mo):
     mo.md(r"""
     ## Output
 
-    Für das Postprocessing werden die unten genannten Dateien übergeben. Da die Numpy-Matrizen nur Vektoren als Zahlenwerte enthalten, sind in den Parquet-Dateien die Zeilen- bzw. Spaltenbeschriftungen sowie weitere Daten (<> Vektoren) enthalten.
+    Für das Postprocessing werden die unten genannten Dateien übergeben, alle in output/[kwic_variant]/ (der Kopierschalter am Ende legt sie nach ../03_postprocessing/input/[kwic_variant]/). Da die Numpy-Matrizen nur Vektoren als Zahlenwerte enthalten, sind in den Parquet-Dateien die Zeilen- bzw. Spaltenbeschriftungen sowie weitere Daten (<> Vektoren) enthalten.
 
     * Zielwörter
-     * **target_slice_vectors_[kwic_variant]_[slice_grid].npy**: Zielwortvektoren pro Zeitscheibe (Zeile i gehört zu target_slice_idx in  target_slices.parquet)
-     * **target_slices_[kwic_variant]_[slice_grid].parquet**: target_slice_idx, Zielwort, Zeitscheibe, die Trefferzahl (n_hits) je Zeile und ob die Zeile in die SVD eingegangen ist (is_fitted)
+     * **target_slice_vectors_[projekt]_[kwic_variant]_[slice_grid].npy**: Zielwortvektoren pro Zeitscheibe (Zeile i gehört zu target_slice_idx in  target_slices.parquet)
+     * **target_slices_[projekt]_[kwic_variant]_[slice_grid].parquet**: target_slice_idx, Zielwort, Zeitscheibe, die Trefferzahl (n_hits) je Zeile und ob die Zeile in die SVD eingegangen ist (is_fitted)
 
     * Kontextwörter
-     * **context_vectors_[kwic_variant]_[slice_grid].npy**: Kontextwort-Vektoren (Zeile j gehört zu context_idx in context_words.parquet)
-     * **context_words_[kwic_variant]_[slice_grid].parquet**: context_idx, Kontextwort, Belegung (in wie vielen Zeilen PPMI > 0, Summe der Kookkurrenzen) und häufigste Wortart
+     * **context_vectors_[projekt]_[kwic_variant]_[slice_grid].npy**: Kontextwort-Vektoren (Zeile j gehört zu context_idx in context_words.parquet)
+     * **context_words_[projekt]_[kwic_variant]_[slice_grid].parquet**: context_idx, Kontextwort, Belegung (in wie vielen Zeilen PPMI > 0, Summe der Kookkurrenzen) und häufigste Wortart
     * Facetten-Zellen (records)
-     * **record_vectors_[kwic_variant]_[slice_grid].npy**: Vektoren der Facetten-Zellen, per folding-in im Raum der Aggregate (Zeile i gehört zu record_idx in records.parquet)
-     * **records_[kwic_variant]_[slice_grid].parquet**: record_idx, Zielwort, Zeitscheibe, Facettenwerte (facet_1, …) und Trefferzahl (n_hits). Ohne Facetten leer.
+     * **record_vectors_[projekt]_[kwic_variant]_[slice_grid].npy**: Vektoren der Facetten-Zellen, per folding-in im Raum der Aggregate (Zeile i gehört zu record_idx in records.parquet)
+     * **records_[projekt]_[kwic_variant]_[slice_grid].parquet**: record_idx, Zielwort, Zeitscheibe, Facettenwerte (facet_1, …) und Trefferzahl (n_hits). Ohne Facetten leer.
     * Metadaten
-     * **emb_meta_[kwic_variant]_[slice_grid].json**: Quelldatei, Zeitraster, k, p, der Frobenius-Anteil, die Mindesttrefferzahl für die SVD (min_hits_fit, null = alle Zeilen), die Zahl der Zeilen in der SVD, die Facetten-Deklaration aus dem Preprocessing (facets) und die Bezugsgrößen der records (record_marginals)
+     * **emb_meta_[projekt]_[kwic_variant]_[slice_grid].json**: Projekt (ID, Name, Quelle), KWIC-Variante, Zeitraster, k, p, der Frobenius-Anteil, die Mindesttrefferzahl für die SVD (min_hits_fit, null = alle Zeilen), die Zahl der Zeilen in der SVD, die Facetten-Deklaration aus dem Preprocessing (facets) und die Bezugsgrößen der records (record_marginals)
 
     U, S und Vt werden nicht gespeichert; aus der abgeschnittenen SVD gehen nur die Zeilen- und Kontextwortvektoren in die Ausgabe ein.
     """)
@@ -737,24 +746,26 @@ def _(
     context_counts,
     context_pos_dominant,
     context_words,
+    corpus_meta,
     eig_p,
-    facets_declaration,
     is_fitted,
     k,
     kwic_variant,
     n_facet_cells,
     np,
+    out_dir,
     pl,
+    project,
     record_vectors,
     records,
     retained_frobenius_sq,
+    run_name,
     slice_grid,
     target_slice_hits,
     target_slice_vectors,
     target_slices,
 ):
     import json
-    from pathlib import Path
 
     # context word vectors from the column side of the SVD, one row per context word
     # unweighted, i.e. without S**eig_p (open question, see "internal/Readme Scientific Methodology.md", 1.9)
@@ -782,18 +793,22 @@ def _(
     # every matrix row has KWIC hits; null would point to a broken join
     assert target_slices_export["n_hits"].null_count() == 0
 
-    # create folder if necessary
-    Path(f"output/{kwic_variant}").mkdir(parents=True, exist_ok=True)
+    # create folder if necessary; every file name carries project, KWIC variant and slice grid
+    out_dir.mkdir(parents=True, exist_ok=True)
+    _path = lambda stem, ext: out_dir / f"{stem}_{run_name}.{ext}"
 
-
-    np.save(f"output/{kwic_variant}/target_slice_vectors_{kwic_variant}_{slice_grid}.npy", target_slice_vectors)
-    np.save(f"output/{kwic_variant}/context_vectors_{kwic_variant}_{slice_grid}.npy", context_vectors)
-    target_slices_export.write_parquet(f"output/{kwic_variant}/target_slices_{kwic_variant}_{slice_grid}.parquet")
-    context_words_export.write_parquet(f"output/{kwic_variant}/context_words_{kwic_variant}_{slice_grid}.parquet")
-    np.save(f"output/{kwic_variant}/record_vectors_{kwic_variant}_{slice_grid}.npy", record_vectors)
-    records.write_parquet(f"output/{kwic_variant}/records_{kwic_variant}_{slice_grid}.parquet")
+    np.save(_path("target_slice_vectors", "npy"), target_slice_vectors)
+    np.save(_path("context_vectors", "npy"), context_vectors)
+    target_slices_export.write_parquet(_path("target_slices", "parquet"))
+    context_words_export.write_parquet(_path("context_words", "parquet"))
+    np.save(_path("record_vectors", "npy"), record_vectors)
+    records.write_parquet(_path("records", "parquet"))
 
     emb_meta = {
+        # project from pipeline_pre_ppmi.py: ID (file names) and name and source for the bundle
+        "project": project,
+        "name": corpus_meta["name"],
+        "source": corpus_meta["source"],
         "kwic_variant": kwic_variant,
         "slice_grid": slice_grid,
         "k": k,
@@ -805,16 +820,16 @@ def _(
         "n_fitted_target_slices": int(is_fitted.sum()),
         # facet declaration from pipeline_pre_ppmi.py (column, id, label, values with n_hits,
         # replacement for missing values), passed on to pipeline_post.py for facets_schema
-        "facets": facets_declaration["facets"],
-        "facet_missing_value": facets_declaration["missing_value"],
+        "facets": corpus_meta["facets"],
+        "facet_missing_value": corpus_meta["missing_value"],
         # PPMI marginals of the records: "facet" = per slice and facet value, "slice" = per slice
         "record_marginals": RECORD_MARGINALS,
         "n_records": records.height,
         # facet cells with hits but without a vector (no positive PPMI column in the vocabulary)
         "n_records_without_vector": n_facet_cells - records.height,
     }
-    with open(f"output/{kwic_variant}/emb_meta_{kwic_variant}_{slice_grid}.json", "w", encoding="utf-8") as _f:
-        json.dump(emb_meta, _f, indent=2)
+    with open(_path("emb_meta", "json"), "w", encoding="utf-8") as _f:
+        json.dump(emb_meta, _f, ensure_ascii=False, indent=2)
 
     print(
         f"target_slice_vectors: {target_slice_vectors.shape}, context_vectors: {context_vectors.shape}, "
@@ -824,7 +839,7 @@ def _(
 
     # everything pipeline_post.py reads, for the copy switch at the end
     emb_output_files = [
-        f"output/{kwic_variant}/{_stem}_{kwic_variant}_{slice_grid}.{_ext}"
+        str(_path(_stem, _ext))
         for _stem, _ext in [
             ("target_slice_vectors", "npy"),
             ("context_vectors", "npy"),

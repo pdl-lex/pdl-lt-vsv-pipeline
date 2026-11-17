@@ -39,6 +39,31 @@ def _(mo):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
+    ## Projekt
+    Ein Projekt ist ein Korpus mit seinen Einstellungen (Quelldateien, Spalten, Facetten, Name und Quelle für das Bundle). Die Projekt-ID steht in allen Dateinamen der Pipeline, von den KWIC-Treffern bis zum Bundle (`kwic_hits_<projekt>_<variante>.csv`, …, `<projekt>_ppmi_<variante>_<raster>.json`). So überschreiben sich die Läufe verschiedener Korpora nicht. In emb und post wird dieselbe Projekt-ID in der ersten Einstellungszelle gesetzt.
+
+    Die Projekte sind unter „Einlesen der Daten“ definiert. Ein neues Projekt braucht dort einen eigenen Zweig und hier einen Eintrag in der Auswahl.
+    """)
+    return
+
+
+@app.cell
+def _(mo):
+    project_picker = mo.ui.dropdown(
+        options={
+            "bundestag: Bundestagsreden (Beispiel)": "bundestag",
+            "zeitenwende: Zeitungen und Zeitschriften (pipeline_pre_dataimport.py)": "zeitenwende",
+        },
+        value="bundestag: Bundestagsreden (Beispiel)",
+        label="Projekt",
+    )
+    mo.style(project_picker, width="560px")
+    return (project_picker,)
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
     ## Laden von Sprachmodellen
     Die in diesem Notebook verwendete Sprachmodelle für NLTK, Stanza und spaCy liegen im Ordner "assets" im Repo-Wurzelverzeichnis. Fehlen sie, lädt das Notebook sie beim ersten Lauf herunter (Internetzugang nötig); danach läuft die Pipeline auch offline.
     """)
@@ -130,7 +155,7 @@ def _(mo):
 
     Wenn keine ID aus den Quelldaten übernommen wird, wird eine ergänzt.
 
-    Zur Wahl stehen zwei Korpora: die Bundestagsreden als Beispiel und die Zeitschriften-Ausgaben, die `pipeline_pre_dataimport.py` erzeugt (eine Datei oder eine pro Jahr bzw. Monat). Beide schreiben in dieselben Ausgabedateien.
+    Das Korpus ergibt sich aus dem Projekt (Abschnitt „Projekt“ oben): die Bundestagsreden als Beispiel (`bundestag`) oder die Zeitungs- und Zeitschriften-Ausgaben, die `pipeline_pre_dataimport.py` erzeugt (`zeitenwende`; eine Datei oder eine pro Jahr bzw. Monat).
 
     **Große Korpora:** Polars hält eine CSV-Datei beim Einlesen vollständig im Speicher, auch wenn sie stückweise abgefragt wird (gemessen: rund 3 GB für eine 2,6-GB-Datei). Für die Bundestagsreden (382 MB) ist das kein Problem, für Zehntausende Zeitschriften-Ausgaben schon. Deshalb wird das Korpus hier nur „lazy“ beschrieben und nicht geladen. Die KWIC-Extraktion liest die Dateien selbst Zeile für Zeile, mit konstantem Speicherbedarf. Alle späteren Schritte arbeiten nur noch mit den Treffern.
     """)
@@ -138,22 +163,10 @@ def _(mo):
 
 
 @app.cell
-def _(mo):
-    corpus_source = mo.ui.dropdown(
-        options={
-            "Bundestagsreden (Beispiel)": "bundestag",
-            "Zeitschriften-Ausgaben (pipeline_pre_dataimport.py)": "editions",
-        },
-        value="Bundestagsreden (Beispiel)",
-        label="Korpus",
-    )
-    mo.style(corpus_source, width="480px")
-    return (corpus_source,)
-
-
-@app.cell
-def _(Path, corpus_source, pl, re):
-    # per corpus:
+def _(Path, pl, project_picker, re):
+    # per project:
+    # - project: project ID, part of all file names of the pipeline
+    # - project_meta: name and source of the corpus, passed on to the bundle (meta.name, meta.source)
     # - corpus_files: the source CSV files
     # - source_columns: source columns for id, date and text, read row by row by the KWIC extraction;
     #   id None = no id in the source, a running number from 1 is added
@@ -166,7 +179,12 @@ def _(Path, corpus_source, pl, re):
     # Missing facet values (empty, "NA") get MISSING_FACET_VALUE: they stay visible as a value of
     # their own in the bundle and are never filtered out.
     MISSING_FACET_VALUE = "nicht zugeordnet"
-    if corpus_source.value == "bundestag":
+    project = project_picker.value
+    if project == "bundestag":
+        project_meta = {
+            "name": "Zeitenwende im Bundestag",
+            "source": "Plenarprotokolle des Deutschen Bundestages (CPP-BT, Fobbe 2026, CC BY-SA 4.0)",
+        }
         corpus_files = ["input/CPP-BT_2026-01-17_DE_CSV_Reden_Gesamt.csv"]
         source_columns = {"id": "rede_id", "date": "sitzung_datum", "text": "rede_text"}
         speaker_facet = "facet_2"
@@ -204,7 +222,12 @@ def _(Path, corpus_source, pl, re):
                 .rename(columns_renamed)
             )
 
-    else:
+    elif project == "zeitenwende":
+        # name and source still to be finalized
+        project_meta = {
+            "name": "Zeitenwende in der Presse",
+            "source": "Zeitungen und Zeitschriften (Quelle und Lizenz ergänzen)",
+        }
         # output of pipeline_pre_dataimport.py: corpus_editions.csv, or one file per year / month
         # (corpus_editions_2025.csv, corpus_editions_2025-08.csv); the report file is left out
         corpus_files = sorted(
@@ -219,12 +242,18 @@ def _(Path, corpus_source, pl, re):
         def prepare_corpus(lf):
             return lf.select("date", "text", "facet_1")
 
+    else:
+        raise ValueError(f"Projekt {project!r} ist nicht definiert")
+
+    # the ID goes into file names: letters, digits, "-" only ("_" separates the parts of a file name)
+    assert re.fullmatch(r"[a-z0-9-]+", project), f"Projekt-ID {project!r}: nur a-z, 0-9 und -"
     assert corpus_files and all(Path(_f).is_file() for _f in corpus_files), (
         f"Korpusdateien nicht gefunden: {corpus_files or 'keine'}"
     )
     # column names in the hits; facet columns must not collide with the columns of the hits
     facet_columns = [_f["column"] for _f in bundle_facets]
     assert len(set(facet_columns)) == len(facet_columns) and all(_c.startswith("facet_") for _c in facet_columns)
+    print(f"Projekt {project}: {project_meta['name']}")
     print(f"{len(corpus_files)} Korpusdatei(en): {', '.join(corpus_files)}")
     print(f"Facetten im Bundle: {', '.join(f'{_f['label']} ({_f['column']})' for _f in bundle_facets) or 'keine'}")
     return (
@@ -233,6 +262,8 @@ def _(Path, corpus_source, pl, re):
         corpus_files,
         facet_columns,
         prepare_corpus,
+        project,
+        project_meta,
         source_columns,
         speaker_facet,
     )
@@ -279,7 +310,7 @@ def _(mo):
 
 
 @app.cell
-def _(corpus, pl, speaker_facet):
+def _(corpus, pl, project, speaker_facet):
     # speaker names as an exact list of real persons in the corpus (more precise than NER, no extra NLP run)
     # the speaker facet has the form "Nachname_Vorname"; multi-part names ("von der Leyen") are split into single
     # tokens, because lemmas are single tokens as well
@@ -303,7 +334,8 @@ def _(corpus, pl, speaker_facet):
             .collect()
         )
 
-    speaker_names_path = "output/speaker_names.csv"
+    # per project, independent of the KWIC variant
+    speaker_names_path = f"output/speaker_names_{project}.csv"
     speaker_names.write_csv(speaker_names_path)
     print(f"{len(speaker_names):,} Namensbestandteile gespeichert")
     return (speaker_names_path,)
@@ -438,10 +470,15 @@ def _(kwic_mode, window_size):
 
 
 @app.cell
-def _(Path, kwic_variant):
-    # create output folder if necessary
-    Path(f"output/{kwic_variant}").mkdir(parents=True, exist_ok=True)
-    return
+def _(Path, kwic_variant, project):
+    # all results of a run go to output/<kwic_variant>/ (one folder per method), and are read from
+    # there; run_id = <project>_<kwic_variant> is part of every file name
+    # (the slice grid is added where the file depends on it)
+    out_dir = Path(f"output/{kwic_variant}")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    run_id = f"{project}_{kwic_variant}"
+    print(f"Ausgabeordner {out_dir}, Dateinamen *_{run_id}*")
+    return out_dir, run_id
 
 
 @app.cell
@@ -724,8 +761,10 @@ def _(
     kwic_variant,
     mo,
     normalize_chars,
+    out_dir,
     pl,
     run,
+    run_id,
     source_columns,
 ):
     # this cell only runs when the "Extraktion starten" button above is hit
@@ -736,7 +775,7 @@ def _(
     # the corpus files are read row by row (read_corpus_rows), the hits written in batches
     # (write_kwic_hits); the progress bar counts megabytes of the corpus files
     _total_mb = sum(Path(_f).stat().st_size for _f in corpus_files) // 1_000_000 + 1
-    _out = Path(f"output/kwic_hits_{kwic_variant}.csv")
+    _out = out_dir / f"kwic_hits_{run_id}.csv"
     with mo.status.progress_bar(total=_total_mb, title=f"KWIC-Extraktion ({kwic_variant}), MB") as _bar:
         _read = {"bytes": 0, "mb": 0}
 
@@ -759,7 +798,8 @@ def _(
             # facet values of the document (e.g. parliamentary group, publication), written with every hit
             facet_cols=[_f["source"] for _f in bundle_facets],
         )
-        # same file name as read below (kwic_variant includes the window size)
+        # same file as read below (kwic_variant includes the window size); the cell below has to be
+        # run again afterwards, it does not depend on this one
         _n_docs, _n_hits = write_kwic_hits(
             _rows, kwic_extract, _out, facet_names=[_f["column"] for _f in bundle_facets]
         )
@@ -776,21 +816,19 @@ def _(kwic_control_mode, kwic_mode):
 
 
 @app.cell
-def _(kwic_variant):
-    print(
-        f"Will load the following pregenerated list: 'output/{kwic_variant}/kwic_hits_{kwic_variant}.csv'"
-    )
+def _(out_dir, run_id):
+    print(f"Will load the following pregenerated list: '{out_dir}/kwic_hits_{run_id}.csv'")
     return
 
 
 @app.cell
-def _(kwic_variant, pl):
-    # Read pre-generated list
+def _(out_dir, pl, run_id):
+    # Read pre-generated list (written by the extraction above, or by an earlier run)
     # default modes are "punkt", "somajo" and "window20"
     # Use control above to switch
 
-    kwic_hits = pl.read_csv(f"output/{kwic_variant}/kwic_hits_{kwic_variant}.csv", null_values="NA")
-    print(f"Geladen: kwic_hits_{kwic_variant}.csv")
+    kwic_hits = pl.read_csv(out_dir / f"kwic_hits_{run_id}.csv", null_values="NA")
+    print(f"Geladen: kwic_hits_{run_id}.csv")
     kwic_hits
     return (kwic_hits,)
 
@@ -831,7 +869,7 @@ def _(nlp, target_forms):
 
 
 @app.cell(hide_code=True)
-def _(kwic_hits, mo, nlp, pl, target_lemma_map_spacy):
+def _(kwic_hits, mo, nlp, out_dir, pl, run_id, target_lemma_map_spacy):
     # deactivated because Stanza is preferred
     # deactivated by default because it requires several minutes to run. instead, a pre-calculated list is loaded below.
 
@@ -868,7 +906,7 @@ def _(kwic_hits, mo, nlp, pl, target_lemma_map_spacy):
     )
 
     # store results as parquet file
-    kwic_hits_lemmatized_spacy.write_parquet("output/kwic_hits_lemmatized_spacy.parquet")
+    kwic_hits_lemmatized_spacy.write_parquet(out_dir / f"kwic_hits_lemmatized_spacy_{run_id}.parquet")
 
     kwic_hits_lemmatized_spacy
     return
@@ -1199,7 +1237,7 @@ def lemmatize_kwic_hits(
 @app.cell
 def _(mo):
     mo.md(r"""
-    Die Lemmatisierung des Kontexts läuft in Stapeln zu 20.000 Treffern, jeder Stapel wird sofort als Teildatei gespeichert (`output/kwic_hits_lemmatized_stanza_<variante>_parts/`). Wird der Lauf abgebrochen, setzt der nächste Lauf beim ersten fehlenden Stapel fort. Das gilt nur, solange die KWIC-Treffer, die Zielwortliste und die Mapping-Einstellungen dieselben sind, sonst wird neu begonnen. Am Ende werden die Teile zu einer Datei zusammengeführt und gelöscht.
+    Die Lemmatisierung des Kontexts läuft in Stapeln zu 20.000 Treffern, jeder Stapel wird sofort als Teildatei gespeichert (`output/<variante>/kwic_hits_lemmatized_stanza_<projekt>_<variante>_parts/`). Wird der Lauf abgebrochen, setzt der nächste Lauf beim ersten fehlenden Stapel fort. Das gilt nur, solange die KWIC-Treffer, die Zielwortliste und die Mapping-Einstellungen dieselben sind, sonst wird neu begonnen. Am Ende werden die Teile zu einer Datei zusammengeführt und gelöscht.
 
     **Mapping der Kontextwörter** (vor Stanza, beide Schalter standardmäßig an):
     * *Zielwortliste auf Kontextwörter anwenden*: Kontextwörter, die als Form in der Zielwortliste stehen, bekommen deren Lemma (`Kyjiw` → `Kiew`, `Soldat*innen` → `Soldat`). So ist ein Wort als Kontext dieselbe Dimension, unter welcher Schreibung es auch vorkommt.
@@ -1223,14 +1261,14 @@ def _(mo):
 
 @app.cell
 def _(
-    Path,
     assets_dir,
     gender_rule,
     kwic_hits,
-    kwic_variant,
     map_contexts,
     mo,
+    out_dir,
     pl,
+    run_id,
     run_lemma,
     stanza,
     target_form_lemmas,
@@ -1269,8 +1307,9 @@ def _(
             target_form_lemmas if map_contexts.value else {}, gender_rule=gender_rule.value
         )
 
-    # store results as parquet file
-    _out = Path(f"output/kwic_hits_lemmatized_stanza_{kwic_variant}.parquet")
+    # store results as parquet file, in the same folder and under the same name as read below
+    # (the cell below has to be run again afterwards, it does not depend on this one)
+    _out = out_dir / f"kwic_hits_lemmatized_stanza_{run_id}.parquet"
     with mo.status.progress_bar(total=kwic_hits.height, title="Lemmatisierung Kontext") as bar3:
         _n_computed = lemmatize_kwic_hits(
             kwic_hits,
@@ -1294,21 +1333,17 @@ def _(kwic_control_mode, kwic_mode):
 
 
 @app.cell
-def _(kwic_variant):
-    print(
-        f"Will load the following pregenerated list: 'output/{kwic_variant}/kwic_hits_lemmatized_stanza_{kwic_variant}.parquet'"
-    )
+def _(out_dir, run_id):
+    print(f"Will load the following pregenerated list: '{out_dir}/kwic_hits_lemmatized_stanza_{run_id}.parquet'")
     return
 
 
 @app.cell
-def _(kwic_variant, pl):
-    # loads a pre-calculated list.
+def _(out_dir, pl, run_id):
+    # loads a pre-calculated list (written by the lemmatization above, or by an earlier run).
     # Replace "stanza" with "spacy" to load the spacy lemmatization.
     # lazy: the following steps stream through the file instead of loading it at once
-    kwic_hits_lemmatized = pl.scan_parquet(
-        f"output/{kwic_variant}/kwic_hits_lemmatized_stanza_{kwic_variant}.parquet"
-    )
+    kwic_hits_lemmatized = pl.scan_parquet(out_dir / f"kwic_hits_lemmatized_stanza_{run_id}.parquet")
     kwic_hits_lemmatized.head(100).collect()
     return (kwic_hits_lemmatized,)
 
@@ -1324,7 +1359,7 @@ def _(mo):
     * Grundform ist der Stamm oder Stamm + *e*, erst danach dieselben ohne Umlaut, jeweils der häufigste, der im Lauf als nicht-feminines Substantiv vorkommt. Bei Komposita ohne belegte Grundform hilft das Grundwort (`Bundesfamilienministerin` → `Ministerin` → `Bundesfamilienminister`). Sonst bleibt die feminine Form.
     * Eine kleine Ausnahmeliste fängt Restfehler ab (`Polin` → `Pole` statt `Pol`; `Engin` ist ein Vorname).
 
-    Die Zuordnung wird als `output/<variante>/feminine_base_map_<variante>.csv` gespeichert und kann dort geprüft werden. Wörter der Zielwortliste sind nicht betroffen, sie haben ihr Lemma bereits aus der Liste. Läufe von vor 2026-11-17 haben keine Spalte `context_gender`; für sie entfällt der Schritt.
+    Die Zuordnung wird als `output/<variante>/feminine_base_map_<projekt>_<variante>.csv` gespeichert und kann dort geprüft werden. Wörter der Zielwortliste sind nicht betroffen, sie haben ihr Lemma bereits aus der Liste. Läufe von vor 2026-11-17 haben keine Spalte `context_gender`; für sie entfällt der Schritt.
     """)
     return
 
@@ -1411,7 +1446,7 @@ def _(mo):
 
 
 @app.cell
-def _(demove_feminines, kwic_hits_lemmatized, kwic_variant, pl):
+def _(demove_feminines, kwic_hits_lemmatized, out_dir, pl, run_id):
     # residual errors of the vocabulary search (checked on the Bundestag run, punkt, 2026-11-17)
     FEMININE_OVERRIDES = {
         "Polin": "Pole",  # would be "Pol"
@@ -1426,7 +1461,7 @@ def _(demove_feminines, kwic_hits_lemmatized, kwic_variant, pl):
         print("Movierte Feminina: Lauf ohne Spalte context_gender, Lemmatisierung neu starten")
     else:
         feminine_bases = feminine_base_map(kwic_hits_lemmatized, FEMININE_OVERRIDES)
-        feminine_bases.write_csv(f"output/{kwic_variant}/feminine_base_map_{kwic_variant}.csv")
+        feminine_bases.write_csv(out_dir / f"feminine_base_map_{run_id}.csv")
         _map = dict(zip(feminine_bases["feminine"], feminine_bases["base"]))
         kwic_hits_contexts = kwic_hits_lemmatized.with_columns(
             pl.col("context_lemmas").list.eval(pl.element().replace(_map))
@@ -1512,12 +1547,12 @@ def slice_kwic_hits(kwic_hits_lemmatized, corpus, slice_grid, facet_columns=(), 
 @app.cell
 def _(
     MISSING_FACET_VALUE,
-    Path,
     corpus,
     facet_columns,
     kwic_hits_contexts,
-    kwic_variant,
+    out_dir,
     pl,
+    run_id,
     slice_grid_picker,
 ):
     # add Quartale, Halbjahre and Jahre to the lists, which up to now only have dates
@@ -1527,7 +1562,7 @@ def _(
         kwic_hits_contexts, corpus, slice_grid_picker.value, facet_columns, MISSING_FACET_VALUE
     )
 
-    _path = Path(f"output/{kwic_variant}/kwic_hits_sliced_{kwic_variant}_{slice_grid_picker.value}.parquet")
+    _path = out_dir / f"kwic_hits_sliced_{run_id}_{slice_grid_picker.value}.parquet"
     _tmp = _path.with_name(_path.stem + ".tmp.parquet")
     kwic_hits_sliced.sink_parquet(_tmp)
     _tmp.replace(_path)
@@ -1619,17 +1654,22 @@ def _(
     cooc_counts_facets,
     facet_values,
     kwic_variant,
+    out_dir,
+    project,
+    project_meta,
+    run_id,
     slice_grid_picker,
 ):
     import json as _json
 
-    _name = f"{kwic_variant}_{slice_grid_picker.value}"
-    cooc_counts.write_csv(f"output/{kwic_variant}/cooc_counts_{_name}.csv")
-    print(f"Gespeichert: output/{kwic_variant}/cooc_counts_{_name}.csv")
+    _name = f"{run_id}_{slice_grid_picker.value}"
+    _cooc_path = out_dir / f"cooc_counts_{_name}.csv"
+    cooc_counts.write_csv(_cooc_path)
+    print(f"Gespeichert: {_cooc_path}")
 
-    # facet-resolved counts and the declaration of the facets, read by pipeline_emb_ppmi.py;
+    # facet-resolved counts and the corpus metadata (project, facets), read by pipeline_emb_ppmi.py;
     # an empty facet list means: corpus without facets, no records in the bundle
-    _facets_path = Path(f"output/{kwic_variant}/cooc_counts_facets_{_name}.parquet")
+    _facets_path = out_dir / f"cooc_counts_facets_{_name}.parquet"
     if bundle_facets:
         cooc_counts_facets.write_parquet(_facets_path)
         print(f"Gespeichert: {_facets_path}")
@@ -1662,21 +1702,29 @@ def _(
                 print(f"  in der Tabelle, ohne Treffer im Korpus: {', '.join(_unused)}")
         return {**facet, "values": _values}
 
+    # corpus metadata for emb and post: project (file names, meta.name, meta.source of the bundle),
+    # run parameters and the facet declaration
     _declaration = {
+        "project": project,
+        "name": project_meta["name"],
+        "source": project_meta["source"],
+        "kwic_variant": kwic_variant,
+        "slice_grid": slice_grid_picker.value,
         "missing_value": MISSING_FACET_VALUE,
         "facets": [_with_attributes(_f) for _f in bundle_facets],
     }
-    with open(f"output/{kwic_variant}/facets_{_name}.json", "w", encoding="utf-8") as _fh:
+    _meta_path = out_dir / f"corpus_meta_{_name}.json"
+    with open(_meta_path, "w", encoding="utf-8") as _fh:
         _json.dump(_declaration, _fh, ensure_ascii=False, indent=2)
-    print(f"Gespeichert: output/{kwic_variant}/facets_{_name}.json")
+    print(f"Gespeichert: {_meta_path}")
     for _f in _declaration["facets"]:
         print(f"  {_f['label']}: " + ", ".join(f"{_v['id']} ({_v['n_hits']:,})" for _v in _f["values"]))
 
     # everything pipeline_emb_ppmi.py reads, for the copy switch at the end
     pre_output_files = [
-        f"output/{kwic_variant}/cooc_counts_{_name}.csv",
-        f"output/{kwic_variant}/kwic_hits_sliced_{_name}.parquet",
-        f"output/{kwic_variant}/facets_{_name}.json",
+        str(_cooc_path),
+        str(out_dir / f"kwic_hits_sliced_{_name}.parquet"),
+        str(_meta_path),
         *([str(_facets_path)] if bundle_facets else []),
     ]
     return (pre_output_files,)
@@ -1697,15 +1745,18 @@ def _(mo):
     mo.md(r"""
     ## Output
 
-    Als Ergebnis des Pre-Processing werden pro KWIC-Extraktionsmethode (40-Zeichen-Fenster, NLTK Punkt und Somajo) die folgenden Dateien erzeugt:
+    Als Ergebnis des Pre-Processing werden pro Projekt und KWIC-Extraktionsmethode (festes Fenster, NLTK Punkt und SoMaJo) die folgenden Dateien erzeugt. Alle liegen in `output/[kwic_variant]/` (ein Ordner je Methode) und werden von dort auch wieder gelesen; nur die Rednernamen hängen nicht von der Methode ab.
 
-    * speaker_names.csv: Extrahierte Redner-Namen, für spätere Filter-Vorbereitung: 1 Datei. Bei Korpora ohne Redner (Zeitschriften) nur die Kopfzeile.
-    * kwic_hits_[kwic_variant]].csv: Treffer pro Zielwort, mit Kontext vor, Kontext nach, Zielwort, Datum und Facettenwerten (facet_1, …) des Dokuments. Für 3 KWIC-Varianten  bis zu 3 Dateien. (Ältere Dateien ohne Datumsspalte funktionieren weiter; das Datum kommt dann über die ID aus dem Korpus. Ohne Facettenspalten bricht das Slicing ab: Extraktion neu starten.)
-    * kwic_hits_lemmatized_stanza_[kwic_variant].parquet: Lemmatisierte Version der kwic_hits_[kwic_variant]].csv. Standardmäßg wird NLTK Stanza für die Lemmatisierung verwendet. Code für spaCy ist enthalten, aber deaktiviert. Für 3 KWIC-Varianten  bis zu 3 Dateien.
-    * kwic_hits_sliced_[kwic_variant]_[slice_grid].parquet: Pro Zeitscheibe aggregierte Version der vorigen Ausgabe: Größere Textmenge bietet mehr Kookkurenzen. Für 3 KWIC-Varianten und 3 Slice-Größen bis zu 9 Dateien.
-    * cooc_counts_[kwic_variant]_[slice_grid]: Kookkurenzen für Slice x Zielwort x Kontextwort. Für 3 KWIC-Varianten und 3 Slice-Größen bis zu 9 Dateien.
-    * cooc_counts_facets_[kwic_variant]_[slice_grid].parquet: dieselben Kookkurrenzen, zusätzlich aufgeteilt nach Facettenwert (Spalten facet_1, …). Nur bei Korpora mit Facetten.
-    * facets_[kwic_variant]_[slice_grid].json: Deklaration der Facetten für das Bundle (Spalte, ID, Bezeichnung, Werte mit Trefferzahl, Ersatzwert für fehlende Angaben). Leere Liste = Korpus ohne Facetten.
+    * output/speaker_names_[projekt].csv: Extrahierte Redner-Namen, für spätere Filter-Vorbereitung. Bei Korpora ohne Redner (Zeitschriften) nur die Kopfzeile.
+    * kwic_hits_[projekt]_[kwic_variant].csv: Treffer pro Zielwort, mit Kontext vor, Kontext nach, Zielwort, Datum und Facettenwerten (facet_1, …) des Dokuments. Ohne Facettenspalten bricht das Slicing ab: Extraktion neu starten.
+    * kwic_hits_lemmatized_stanza_[projekt]_[kwic_variant].parquet: Lemmatisierte Version der KWIC-Treffer. Standardmäßg wird Stanza für die Lemmatisierung verwendet. Code für spaCy ist enthalten, aber deaktiviert.
+    * feminine_base_map_[projekt]_[kwic_variant].csv: Zuordnung der movierten Feminina zur Grundform, zur Prüfung.
+    * kwic_hits_sliced_[projekt]_[kwic_variant]_[slice_grid].parquet: Die lemmatisierten Treffer mit Zeitscheibe.
+    * cooc_counts_[projekt]_[kwic_variant]_[slice_grid].csv: Kookkurenzen für Slice x Zielwort x Kontextwort.
+    * cooc_counts_facets_[projekt]_[kwic_variant]_[slice_grid].parquet: dieselben Kookkurrenzen, zusätzlich aufgeteilt nach Facettenwert (Spalten facet_1, …). Nur bei Korpora mit Facetten.
+    * corpus_meta_[projekt]_[kwic_variant]_[slice_grid].json: Projekt (ID, Name, Quelle), Laufparameter und Deklaration der Facetten für das Bundle (Spalte, ID, Bezeichnung, Werte mit Trefferzahl, Ersatzwert für fehlende Angaben). Leere Facettenliste = Korpus ohne Facetten.
+
+    Der Kopierschalter unten legt die Dateien, die emb liest, nach `../02_embedding/input/[kwic_variant]/` und die Rednernamen nach `../03_postprocessing/input/`.
     """)
     return
 
@@ -1714,7 +1765,7 @@ def _(mo):
 def _(mo):
     copy_switch = mo.ui.switch(
         value=True,
-        label="Nach 02_embedding/input kopieren, speaker_names.csv nach 03_postprocessing/input (sonst nur output/)",
+        label="Nach 02_embedding/input kopieren, speaker_names_<projekt>.csv nach 03_postprocessing/input (sonst nur output/)",
     )
     copy_switch
     return (copy_switch,)

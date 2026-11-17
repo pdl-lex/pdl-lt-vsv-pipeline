@@ -93,20 +93,21 @@ def _(mo):
 def _(mo):
     mo.md(r"""
     ## Input
-    Geladen werden die Daten aus input/[kwic_variant]. Dorthin kopiert sie der Schalter am Ende von pipeline_emb_ppmi.py aus stages/02_embedding/output/[kwic_variant]; speaker_names.csv kopiert pipeline_pre_ppmi.py nach input/.
-    Pro KWIC-Variante und Slice existieren fünf Dateien:
+    Geladen werden die Daten aus input/[kwic_variant]. Dorthin kopiert sie der Schalter am Ende von pipeline_emb_ppmi.py aus stages/02_embedding/output/[kwic_variant]; speaker_names_[projekt].csv kopiert pipeline_pre_ppmi.py nach input/.
+    Projekt, KWIC-Variante und Raster werden in der folgenden Zelle gesetzt, wie in emb. Alle Dateinamen enthalten sie ([projekt]_[kwic_variant]_[slice_grid]); das Bundle und der Suchraum werden als output/[kwic_variant]/[projekt]_ppmi_[kwic_variant]_[slice_grid].* geschrieben.
+    Pro Projekt, KWIC-Variante und Slice existieren diese Dateien:
     * Zielwörter
-     * **target_slice_vectors_[kwic_variant]_[slice_grid].npy**: Zielwortvektoren pro Zeitscheibe (Zeile i gehört zu target_slice_idx in  target_slices.parquet)
-     * **target_slices_[kwic_variant]_[slice_grid].parquet**: target_slice_idx, Zielwort, Zeitscheibe und die Trefferzahl (n_hits) je Zeile
+     * **target_slice_vectors_[projekt]_[kwic_variant]_[slice_grid].npy**: Zielwortvektoren pro Zeitscheibe (Zeile i gehört zu target_slice_idx in  target_slices.parquet)
+     * **target_slices_[projekt]_[kwic_variant]_[slice_grid].parquet**: target_slice_idx, Zielwort, Zeitscheibe und die Trefferzahl (n_hits) je Zeile
 
     * Kontextwörter
-     * **context_vectors_[kwic_variant]_[slice_grid].npy**: Kontextwort-Vektoren (Zeile j gehört zu context_idx in context_words.parquet)
-     * **context_words_[kwic_variant]_[slice_grid].parquet**: context_idx, Kontextwort, Belegung (in wie vielen Zeilen PPMI > 0, Summe der Kookkurrenzen) und häufigste Wortart
+     * **context_vectors_[projekt]_[kwic_variant]_[slice_grid].npy**: Kontextwort-Vektoren (Zeile j gehört zu context_idx in context_words.parquet)
+     * **context_words_[projekt]_[kwic_variant]_[slice_grid].parquet**: context_idx, Kontextwort, Belegung (in wie vielen Zeilen PPMI > 0, Summe der Kookkurrenzen) und häufigste Wortart
     * Facetten-Zellen (records)
-     * **record_vectors_[kwic_variant]_[slice_grid].npy**: Vektoren je Zielwort, Zeitscheibe und Facettenwert (Zeile i gehört zu record_idx in records.parquet)
-     * **records_[kwic_variant]_[slice_grid].parquet**: record_idx, Zielwort, Zeitscheibe, Facettenwerte und Trefferzahl (n_hits)
+     * **record_vectors_[projekt]_[kwic_variant]_[slice_grid].npy**: Vektoren je Zielwort, Zeitscheibe und Facettenwert (Zeile i gehört zu record_idx in records.parquet)
+     * **records_[projekt]_[kwic_variant]_[slice_grid].parquet**: record_idx, Zielwort, Zeitscheibe, Facettenwerte und Trefferzahl (n_hits)
     * Metadaten
-     * **emb_meta_[kwic_variant]_[slice_grid].json**: Quelldatei, Zeitraster, k, p, der Frobenius-Anteil und die Facetten-Deklaration (facets)
+     * **emb_meta_[projekt]_[kwic_variant]_[slice_grid].json**: Projekt (ID, Name, Quelle), KWIC-Variante, Zeitraster, k, p, der Frobenius-Anteil und die Facetten-Deklaration (facets)
 
     Möchte man verschiedene Outputs für verschiedene Varianten erzeugen, muss der embedding-Schritt mehrfach durchlaufen werden.
 
@@ -117,17 +118,27 @@ def _(mo):
 
 @app.cell
 def _():
-    kwic_variant="punkt"
-    slice_grid="halfyear"
-    return kwic_variant, slice_grid
+    # same project, KWIC variant and slice grid as in pipeline_emb_ppmi.py
+    project = "bundestag"
+    kwic_variant = "punkt"
+    slice_grid = "halfyear"
+
+    from pathlib import Path
+
+    # read from input/<kwic_variant>/, write to output/<kwic_variant>/ (one folder per method);
+    # run_name = <project>_<kwic_variant>_<slice_grid> is part of every file name
+    in_dir = Path(f"input/{kwic_variant}")
+    out_dir = Path(f"output/{kwic_variant}")
+    run_name = f"{project}_{kwic_variant}_{slice_grid}"
+    return Path, in_dir, kwic_variant, out_dir, project, run_name, slice_grid
 
 
 @app.cell
-def _(kwic_variant, np, slice_grid):
+def _(in_dir, np, run_name):
     # target_slice_vectors.npy (target words per slice)
     # one row per target word and slice, row i belongs to target_slice_idx in target_slices
 
-    target_slice_vectors = np.load(f"input/{kwic_variant}/target_slice_vectors_{kwic_variant}_{slice_grid}.npy")
+    target_slice_vectors = np.load(in_dir / f"target_slice_vectors_{run_name}.npy")
 
     print(f"Die Vektor-Matrix der Zielwörter hat {target_slice_vectors.shape[1]} Spalten, definiert durch den Wert von k im Embedding-Schritt. Sie hat {target_slice_vectors.shape[0]} Zeilen. Das entspricht Zielwörter x Jahre (13) x Scheibengröße abzüglich nicht belegter Scheiben.")
 
@@ -136,11 +147,11 @@ def _(kwic_variant, np, slice_grid):
 
 
 @app.cell
-def _(kwic_variant, np, slice_grid):
+def _(in_dir, np, run_name):
     # context_vectors.npy (context words)
     # one row per context word (column side of the SVD), row j belongs to context_idx in context_words_emb
 
-    context_vectors = np.load(f"input/{kwic_variant}/context_vectors_{kwic_variant}_{slice_grid}.npy")
+    context_vectors = np.load(in_dir / f"context_vectors_{run_name}.npy")
 
     print(f"Die Vektor-Matrix der Kontextwörter hat {context_vectors.shape[1]} Spalten, definiert durch den Wert von k im Embedding-Schritt. Sie hat {context_vectors.shape[0]} Zeilen: eine je Kontextwort-Lemma, das in mindestens einer Zelle (Zielwort × Zeitscheibe) einen PPMI-Wert > 0 hat. Das entspricht den Spalten der PPMI-Matrix.")
 
@@ -149,12 +160,12 @@ def _(kwic_variant, np, slice_grid):
 
 
 @app.cell
-def _(kwic_variant, pl, slice_grid):
+def _(in_dir, pl, run_name):
     # vector row headers and data
     # target_slices
     # target_slice_idx, target_lemma, slice, n_hits
 
-    target_slices = pl.read_parquet(f"input/{kwic_variant}/target_slices_{kwic_variant}_{slice_grid}.parquet")
+    target_slices = pl.read_parquet(in_dir / f"target_slices_{run_name}.parquet")
 
     print(f"Die Tabelle 'target_slices' hat {target_slices.shape[1]} Spalten: Index, Lemma, Slice und Frequenz. Sie hat {target_slices.shape[0]} Zeilen:  Das entspricht Zielwörter x Jahre (13) x Scheibengröße abzüglich nicht belegter Scheiben. Der Index 'row i' passt zum Index von vectors (gleiche Zeilenzahl).")
 
@@ -164,12 +175,12 @@ def _(kwic_variant, pl, slice_grid):
 
 
 @app.cell
-def _(kwic_variant, pl, slice_grid):
+def _(in_dir, pl, run_name):
     # context_vectors column headers and data
     # context_words_emb
     # context_idx, context_lemma, n_target_slices, n_cooc, pos
 
-    context_words_emb = pl.read_parquet(f"input/{kwic_variant}/context_words_{kwic_variant}_{slice_grid}.parquet")
+    context_words_emb = pl.read_parquet(in_dir / f"context_words_{run_name}.parquet")
 
     print(f"Die Tabelle 'context_words_emb' hat {context_words_emb.shape[1]} Spalten: Index, Kontext-Lemma, Anzahl der belegten Zellen, Anzahl der Vorkommen in den belegten Zellen, und POS. Sie hat {context_words_emb.shape[0]} Zeilen: eine je Kontextwort-Lemma, das in mindestens einer Zelle (Zielwort × Zeitscheibe) einen PPMI-Wert > 0 hat. Der Index 'column j' passt zum Index von context_vectors (gleiche Zeilenzahl). \n\nDer PPMI-Wert ist nur dann >0, wenn das Vorkommen häufiger ist als erwartet. Ein Kontextwort kanna lso durchaus häufiger auftauchen, wird aber nur gewertet, wenn das Vorkommen wahrscheinlich ist als zu erwarten war.\n\nn_occurrences ist immer gleich oder größer als n_target_slices. Mehrfach gezählt wird ein Kontextwort in drei Fällen: 1) Das Wort steht in mehreren KWIC-Kontexten derselben Zelle. 2) Das Wort steht mehrmals im selben Kontext. 3) Ein Satz enthält zwei Zielwörter. Dann gibt es zwei KWIC-Zeilen, und der Kontext wird für beide Zielwörter gezählt." )
 
@@ -178,26 +189,29 @@ def _(kwic_variant, pl, slice_grid):
 
 
 @app.cell
-def _(json, kwic_variant, slice_grid):
+def _(in_dir, json, kwic_variant, project, run_name, slice_grid):
     # Meta Data
     # emb_meta.json
 
-    with open(f"input/{kwic_variant}/emb_meta_{kwic_variant}_{slice_grid}.json", encoding="utf-8") as _f:
+    with open(in_dir / f"emb_meta_{run_name}.json", encoding="utf-8") as _f:
         emb_meta = json.load(_f)
 
-    # _ to avoid double import
-    _slice_grid = emb_meta["slice_grid"]  # year, halfyear, quarter
+    assert (emb_meta["project"], emb_meta["kwic_variant"], emb_meta["slice_grid"]) == (
+        project,
+        kwic_variant,
+        slice_grid,
+    ), "emb_meta passt nicht zu den Einstellungen oben"
 
     print(emb_meta)
     return (emb_meta,)
 
 
 @app.cell
-def _(kwic_variant, np, pl, slice_grid):
+def _(in_dir, np, pl, run_name):
     # facet cells (records): one row per target word, slice and facet value, vectors by folding-in
     # into the space of the aggregates (see pipeline_emb_ppmi.py, "Facetten-Zellen"); empty without facets
-    record_vectors = np.load(f"input/{kwic_variant}/record_vectors_{kwic_variant}_{slice_grid}.npy")
-    records = pl.read_parquet(f"input/{kwic_variant}/records_{kwic_variant}_{slice_grid}.parquet")
+    record_vectors = np.load(in_dir / f"record_vectors_{run_name}.npy")
+    records = pl.read_parquet(in_dir / f"records_{run_name}.parquet")
     assert (records["record_idx"].to_numpy() == np.arange(record_vectors.shape[0])).all()
     records
     return record_vectors, records
@@ -501,11 +515,11 @@ def _(mo):
 
 
 @app.cell
-def _(pl):
-    # names of the persons speaking in the corpus, exported by pipeline_pre_ppmi.py.
+def _(pl, project):
+    # names of the persons speaking in the corpus, exported by pipeline_pre_ppmi.py (per project).
     # More precise than NER and without another NLP run, because it is an exact
     # list of real persons. Does not cover names of persons who are not speakers.
-    speaker_names = pl.read_csv("input/speaker_names.csv")["name"]
+    speaker_names = pl.read_csv(f"input/speaker_names_{project}.csv")["name"]
     return (speaker_names,)
 
 
@@ -819,18 +833,23 @@ def _(mo):
 def _(
     context_vectors_unit,
     context_words,
+    kwic_variant,
     neighbor_n_target_slices_min,
     neighbor_pos_allowed,
     np,
+    out_dir,
     pl,
+    project,
     slice_grid,
     stopwords,
     target_slice_coords,
     target_slice_vectors_unit,
     target_slices,
 ):
-    # grid in the file name: several versions can coexist
-    bundle_base = f"bundestag_zeitenwende_{slice_grid}"
+    # project, method and grid in the file name: bundles of several projects and runs can coexist,
+    # also in backend/bundles (e.g. next to bundestag_sgns_year.json from the SGNS path)
+    bundle_base = f"{project}_ppmi_{kwic_variant}_{slice_grid}"
+    out_dir.mkdir(parents=True, exist_ok=True)
 
     # queries first, then candidates; position in the matrix = column "row" of the index
     # converted to f32 to save disk space
@@ -916,7 +935,7 @@ def _(
     }
 
     #save the two files
-    space_files = [f"output/{bundle_base}.space_vectors.npy", f"output/{bundle_base}.space_index.parquet"]
+    space_files = [str(out_dir / f"{bundle_base}.space_vectors.npy"), str(out_dir / f"{bundle_base}.space_index.parquet")]
     np.save(space_files[0], space_vectors)
     space_index.write_parquet(space_files[1])
 
@@ -1309,6 +1328,7 @@ def _(
     kwic_variant,
     neighbor_space_meta,
     neighbors,
+    out_dir,
     pca_explained,
     slice_grid,
     targets,
@@ -1337,7 +1357,9 @@ def _(
 
     # metadata
     bundle_meta = {
-        "name": f"Zeitenwende im Bundestag ({slice_title})",
+        # project name from pipeline_pre_ppmi.py (via emb_meta), with grid and KWIC variant, so that
+        # bundles of different runs can be told apart in the bundle picker
+        "name": f"{emb_meta['name']} ({slice_title}, {kwic_variant})",
         "description": (
             f"{len(targets)} Zielwörter aus dem Zeitenwende-Wortfeld über "
             f"{len(time_slices)} Zeitscheiben ({slice_title.lower()}). "
@@ -1347,10 +1369,7 @@ def _(
             f"aus den Modulen, die mit vector rechnen."
         ),
         # data provenance, shown as "Quelle" in the explorer
-        "source": (
-            "Plenarprotokolle des Deutschen Bundestages "
-            "(CPP-BT, Fobbe 2026, CC BY-SA 4.0)"
-        ),
+        "source": emb_meta["source"],
         "vector_dim": bundle_vector_dim,
         # weighting of the row vectors U·S^p after the SVD
         "eig_p": float(emb_meta["eig_p"]),
@@ -1432,7 +1451,7 @@ def _(
         "neighbors": neighbors,
     }
 
-    bundle_path = f"output/{bundle_base}.json"
+    bundle_path = str(out_dir / f"{bundle_base}.json")
 
     # ensure_ascii=False: umlauts stay umlauts
     with open(bundle_path, "w", encoding="utf-8") as _f:
@@ -1469,13 +1488,12 @@ def _(mo):
 
 
 @app.cell
-def _(bundle_path, copy_switch, space_files):
+def _(Path, bundle_path, copy_switch, space_files):
     # copy to the backend
-    # output/ is the pipeline's workbench, backend/bundles/ of the pdl-lt-vsv repo
-    # (next to this repo) is what the app actually loads.
-    # The search space files belong to the bundle and are copied along.
+    # output/<kwic_variant>/ is the pipeline's workbench, backend/bundles/ of the pdl-lt-vsv repo
+    # (next to this repo) is what the app actually loads (flat; the file names carry project,
+    # method and grid). The search space files belong to the bundle and are copied along.
     import shutil
-    from pathlib import Path
 
     if copy_switch.value:
         _backend_dir = Path("../../../pdl-lt-vsv/backend/bundles")

@@ -517,6 +517,8 @@ def _(kwic_hits_sliced, pl, ppmi_positive_indexed):
     # dominant POS per lemma
     # a lemma can carry several tags ("gut" as ADV and ADJ); only the more frequent one is kept
     # deliberately not via .sort().unique(keep="first"), whose order is not guaranteed
+    # ties (e.g. 3x NOUN, 3x PROPN) are broken alphabetically by POS via the second sort key,
+    # otherwise the result would depend on the row order of group_by, which polars does not guarantee
     # the counts per (lemma, POS) are made in streaming mode: the exploded list (one row per
     # context word of every hit) never exists as a whole; the result is small
     context_pos_dominant = (
@@ -528,7 +530,7 @@ def _(kwic_hits_sliced, pl, ppmi_positive_indexed):
         .len()
         .collect(engine="streaming")
         .group_by("context_lemma")
-        .agg(pl.col("pos").sort_by("len", descending=True).first())
+        .agg(pl.col("pos").sort_by(["len", "pos"], descending=[True, False]).first())
     )
     return context_counts, context_pos_dominant
 

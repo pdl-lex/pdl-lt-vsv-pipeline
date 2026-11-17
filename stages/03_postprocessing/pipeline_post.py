@@ -323,11 +323,17 @@ def _(target_slice_vectors_unit):
     # The vectors have different lengths (Euclidean norm, not dimensionality), resulting
     # from the amount of data in a cell (more speech volume => more text => more
     # cooccurrences => more non-zero cells and larger values => larger geometric length).
-    # Unnormalized, this length difference is the largest spread in the data.
-    # PCA would build its first axis from it instead of from the actual (semantically
-    # interesting) differences in direction.
-
-    # The similarity computation via cosine is length-invariant, but choosing the right axes is crucial.
+    # Unnormalized, this length difference is the largest spread in the data and
+    # PCA builds its first axis from it (k = 300, punkt/halfyear: Spearman rho of
+    # PC1 with n_hits 0.87).
+    # Normalization removes the length, but not the volume effect: sparsely
+    # populated cells also point in other directions, so PC1 still mainly shows
+    # how well a cell is populated (rho 0.82 after normalization).
+    # Normalization is kept because the similarity computation via cosine only
+    # uses directions, and anchors/context words are projected normalized as well.
+    # Trade-off (2026-11-17): more explained variance in 3D (6.9 % vs. 2.5 %), but
+    # weaker separation of the target words (57 % vs. 78 % of the 3D variance
+    # between target words). See internal/nextsteps.md.
 
     # The normalization here is not to be confused with the row normalization **before** the SVD, which was rejected.
 

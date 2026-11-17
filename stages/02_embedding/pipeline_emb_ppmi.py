@@ -384,13 +384,51 @@ def _(context_words, np, ppmi_positive_indexed, target_slices):
     return (ppmi_matrix,)
 
 
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    **Optional: SVD nur an ausreichend belegten Zeilen**
+
+    Mit `MIN_HITS_FIT` lässt sich festlegen, dass nur Zeilen mit mindestens so vielen Treffern (`n_hits`) die SVD bestimmen. Die übrigen Zeilen werden anschließend per *folding-in* in denselben Raum projiziert (Deerwester et al. 1990; Berry, Dumais & O'Brien 1995). Sie bleiben also erhalten, bestimmen die Achsen aber nicht mit, und sind in der Ausgabe mit `is_fitted = false` markiert.
+
+    Voreingestellt ist `None`: Alle Zeilen gehen in die SVD ein. Ob der Schalter für ein Korpus sinnvoll ist und welcher Wert, zeigt `pipeline_emb_ppmi_diagnose.py` (Abschnitt 1: Schwelle; Abschnitt 2: ob der Fit ohne diese Zeilen den Raum verbessert). Nur einsetzen, wenn Abschnitt 2 für den gewählten Wert eine Verbesserung zeigt.
+    """)
+    return
+
+
 @app.cell
-def _(np, ppmi_matrix):
+def _(kwic_hits_sliced, np, pl, target_slices):
+    # None = all rows take part in the SVD (default); a number = only rows with at least this many hits
+    MIN_HITS_FIT = None
+
+    # n_hits = number of KWIC hits per target word and slice, counted before explode
+    target_slice_hits = (
+        kwic_hits_sliced
+        .group_by(["slice", "target_lemma"])
+        .len()
+        .rename({"len": "n_hits"})
+    )
+    _row_hits = (
+        target_slices
+        .join(target_slice_hits, on=["slice", "target_lemma"], how="left")
+        .sort("target_slice_idx")["n_hits"]
+        .to_numpy()
+    )
+    is_fitted = (
+        np.ones(len(_row_hits), dtype=bool) if MIN_HITS_FIT is None else _row_hits >= MIN_HITS_FIT
+    )
+    print(f"Zeilen in der SVD: {is_fitted.sum()} von {len(is_fitted)}")
+    return MIN_HITS_FIT, is_fitted, target_slice_hits
+
+
+@app.cell
+def _(is_fitted, np, ppmi_matrix):
     # Singular Value Decomposition
     #  M = U * S * Vt
     # full_matrices=False: numpy only calculates min(rows, columns) dimensions instead of columns x columns for V
+    # with MIN_HITS_FIT set, only the fitted rows enter the decomposition (U then has only those rows)
 
-    U, S, Vt = np.linalg.svd(ppmi_matrix, full_matrices=False)
+    U, S, Vt = np.linalg.svd(ppmi_matrix[is_fitted], full_matrices=False)
 
     print("U :", U.shape)   # rows in new space
     print("S :", S.shape)   # relevance of each axis
@@ -420,14 +458,18 @@ def _(mo):
 
 
 @app.cell
-def _(S, U):
+def _(MIN_HITS_FIT, S, U, Vt, ppmi_matrix):
     k = 100
     eig_p = 1
 
     # row vector = U_k * S_k**p (eigenvalue weighting, Caron 2001)
     # p = 1 weights each dimension by its full singular value; p = 0.5 reduces the weight
     # of the leading dimensions relative to the others
-    target_slice_vectors = U[:, :k] * S[:k] ** eig_p
+    if MIN_HITS_FIT is None:
+        target_slice_vectors = U[:, :k] * S[:k] ** eig_p
+    else:
+        # folding-in for all rows: m V_k S_k**(p-1); identical to U_k S_k**p for the fitted rows
+        target_slice_vectors = (ppmi_matrix @ Vt[:k].T) * S[:k] ** (eig_p - 1)
     return eig_p, k, target_slice_vectors
 
 
@@ -440,13 +482,13 @@ def _(mo):
 
     * Zielwörter
      * **target_slice_vectors_[kwic_variant]_[slice_grid].npy**: Zielwortvektoren pro Zeitscheibe (Zeile i gehört zu target_slice_idx in  target_slices.parquet)
-     * **target_slices_[kwic_variant]_[slice_grid].parquet**: target_slice_idx, Zielwort, Zeitscheibe und die Trefferzahl (n_hits) je Zeile
+     * **target_slices_[kwic_variant]_[slice_grid].parquet**: target_slice_idx, Zielwort, Zeitscheibe, die Trefferzahl (n_hits) je Zeile und ob die Zeile in die SVD eingegangen ist (is_fitted)
 
     * Kontextwörter
      * **context_vectors_[kwic_variant]_[slice_grid].npy**: Kontextwort-Vektoren (Zeile j gehört zu context_idx in context_words.parquet)
      * **context_words_[kwic_variant]_[slice_grid].parquet**: context_idx, Kontextwort, Belegung (in wie vielen Zeilen PPMI > 0, Summe der Kookkurrenzen) und häufigste Wortart
     * Metadaten
-     * **emb_meta_[kwic_variant]_[slice_grid].json**: Quelldatei, Zeitraster, k, p und der Frobenius-Anteil
+     * **emb_meta_[kwic_variant]_[slice_grid].json**: Quelldatei, Zeitraster, k, p, der Frobenius-Anteil, die Mindesttrefferzahl für die SVD (min_hits_fit, null = alle Zeilen) und die Zahl der Zeilen in der SVD
 
     U, S und die vollständige Vt werden nicht gespeichert. Insbesondere Vt wäre mit (Zeilen × Kontextwörter) sehr groß, genutzt werden aber nur die ersten k Zeilen.
     """)
@@ -483,17 +525,20 @@ def _(kwic_hits_sliced, pl, ppmi_positive_indexed):
 
 @app.cell
 def _(
+    MIN_HITS_FIT,
     Vt,
     context_counts,
     context_pos_dominant,
     context_words,
     eig_p,
+    is_fitted,
     k,
-    kwic_hits_sliced,
     kwic_variant,
     np,
+    pl,
     retained_frobenius_sq,
     slice_grid,
+    target_slice_hits,
     target_slice_vectors,
     target_slices,
 ):
@@ -504,19 +549,13 @@ def _(
     # unweighted, i.e. without S**eig_p (open question, see "internal/Readme Scientific Methodology.md", 1.9)
     context_vectors = Vt[:k].T
 
-    # n_hits = number of KWIC hits per target word and slice, counted before explode
-    target_slice_hits = (
-        kwic_hits_sliced
-        .group_by(["slice", "target_lemma"])
-        .len()
-        .rename({"len": "n_hits"})
-    )
-
     # joins give no order guarantee, so restore matrix order explicitly
+    # is_fitted: row took part in the SVD (false only with MIN_HITS_FIT set, see above)
     target_slices_export = (
         target_slices
         .join(target_slice_hits, on=["slice", "target_lemma"], how="left")
         .sort("target_slice_idx")
+        .with_columns(pl.Series("is_fitted", is_fitted))
     )
 
     context_words_export = (
@@ -549,6 +588,8 @@ def _(
         "n_target_slices": target_slice_vectors.shape[0],
         "n_context_words": context_vectors.shape[0],
         "retained_frobenius_sq": float(retained_frobenius_sq),
+        "min_hits_fit": MIN_HITS_FIT,
+        "n_fitted_target_slices": int(is_fitted.sum()),
     }
     with open(f"output/{kwic_variant}/emb_meta_{kwic_variant}_{slice_grid}.json", "w", encoding="utf-8") as _f:
         json.dump(emb_meta, _f, indent=2)

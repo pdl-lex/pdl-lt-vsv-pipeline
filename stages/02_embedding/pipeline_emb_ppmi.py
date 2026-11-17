@@ -42,6 +42,7 @@ def _(mo):
 
     * **kwic_hits_sliced_[kwic_variant]_[slice_grid].parquet: Pro Zeitscheibe aggregierte Version der lemmatisierten KWIC.
     * cooc_counts_[kwic_variant]_[slice_grid]: Kookkurenzen für Slice x Zielwort x Kontextwort.
+    * facets_[kwic_variant]_[slice_grid].json und cooc_counts_facets_[kwic_variant]_[slice_grid].parquet: Deklaration der Facetten und die Kookkurrenzen je Facettenwert, für die Facetten-Zellen (records).
 
     Folgende Varianten stehen zur Verfügung:
 
@@ -483,6 +484,173 @@ def _(MIN_HITS_FIT, S, U, Vt, ppmi_matrix):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
+    ## Facetten-Zellen (records)
+
+    Bisher ist eine Zeile der Matrix ein Zielwort in einer Zeitscheibe (Aggregat). Liegt eine Facette vor (Fraktion, Publikation), wird dieselbe Zeile zusätzlich je Facettenwert berechnet: Zielwort × Zeitscheibe × Facettenwert. Diese Zellen heißen im Bundle *records*.
+
+    **Ein Raum.** Die records gehen nicht in die SVD ein. Ihre PPMI-Zeilen werden per *folding-in* in den Raum der Aggregate projiziert (Deerwester et al. 1990; Berry, Dumais & O'Brien 1995), mit derselben Eigenwertgewichtung wie die Aggregate: Zeilenvektor = m · V_k · Σ_k^(p−1). Für eine Zeile der SVD ergibt das genau U_k · Σ_k^p, die Prüfzelle unten bestätigt das an den Aggregaten. Achsen, k und p bleiben unverändert, und alle Vektoren sind vergleichbar. Eine eigene Zerlegung je Facettenwert würde Räume liefern, die erst aneinander ausgerichtet werden müssten.
+
+    **Bezugsgrößen der PPMI** (`RECORD_MARGINALS`). Voreinstellung ist `"facet"`: Erwartungswert und Randsummen werden je Zeitscheibe *und* Facettenwert berechnet, also im Teilkorpus etwa einer Publikation in einem Halbjahr. Das setzt fort, was für die Aggregate schon gilt (jede Zeitscheibe hat ihre eigenen Randsummen): Jede Publikation wird an ihrem eigenen Vokabular gemessen. Ein Kontextwort, das eine Publikation durchgehend häufig verwendet, erhält dort keinen hohen PPMI-Wert, nur weil es häufig ist. Unterschiede zwischen den Publikationen zeigen dann, wie sie ein Zielwort verschieden verwenden, und nicht, worüber sie insgesamt häufiger schreiben. Mit `"slice"` gelten die Randsummen der ganzen Zeitscheibe (nur die Zeilensumme ist die der Facetten-Zelle). Ein record misst dann die Abweichung vom Gesamtbild der Zeitscheibe, einschließlich des Hausvokabulars der Publikation.
+
+    **Grenzen.** Kontextwörter, die in keinem Aggregat einen PPMI-Wert > 0 haben, sind keine Spalte der Matrix und fallen bei den records weg. Facetten-Zellen ohne eine einzige positive PPMI-Spalte im Vokabular haben keinen Vektor und keine Position. Ihre Zahl wird unten ausgegeben. Dünn belegte Zellen bleiben erhalten; ihre Trefferzahl (`n_hits`) wird im Bundle als `freq` mitgeliefert.
+    """)
+    return
+
+
+@app.function
+def fold_in(rows, cols, values, n_rows, context_vectors, singular_values, eig_p, chunk=100_000):
+    """
+    Folding-in of sparse PPMI rows into the SVD space: row vector = m V_k S_k^(p-1).
+
+    rows, cols, values: the nonzero entries (row index, column index = context_idx, PPMI);
+    context_vectors: V_k (one row per context word, k columns); singular_values: S[:k].
+    Works on the entries in chunks, so no dense rows x contexts matrix is built.
+    """
+    import numpy as np
+
+    order = np.argsort(rows, kind="stable")
+    rows, cols, values = rows[order], cols[order], values[order]
+    out = np.zeros((n_rows, context_vectors.shape[1]), dtype=np.float64)
+    for start in range(0, len(rows), chunk):
+        r = rows[start : start + chunk]
+        contrib = values[start : start + chunk, None] * context_vectors[cols[start : start + chunk]]
+        # rows are sorted: sum each run of equal rows, then add to the output (a row can continue
+        # in the next chunk, it is then added twice, which is correct)
+        bounds = np.flatnonzero(np.r_[True, r[1:] != r[:-1]])
+        out[r[bounds]] += np.add.reduceat(contrib, bounds, axis=0)
+    return (out * singular_values.astype(np.float64) ** (eig_p - 1)).astype(np.float32)
+
+
+@app.cell
+def _(S, Vt, eig_p, k, np, ppmi_positive_indexed, target_slice_vectors):
+    # check: folding-in of the aggregate rows reproduces their SVD vectors (U_k S_k^p);
+    # if this fails, the records below would not lie in the space of the aggregates
+    _check = fold_in(
+        ppmi_positive_indexed["target_slice_idx"].to_numpy(),
+        ppmi_positive_indexed["context_idx"].to_numpy(),
+        ppmi_positive_indexed["ppmi"].to_numpy(),
+        target_slice_vectors.shape[0],
+        Vt[:k].T,
+        S[:k],
+        eig_p,
+    )
+    _dev = np.abs(_check - target_slice_vectors).max() / np.abs(target_slice_vectors).max()
+    assert _dev < 1e-3, f"folding-in weicht von den SVD-Vektoren ab (relativ {_dev:.2e})"
+    print(f"folding-in der Aggregate = SVD-Vektoren (größte relative Abweichung {_dev:.1e})")
+    return
+
+
+@app.cell
+def _(kwic_variant, pl, slice_grid):
+    import json as _json
+
+    # declaration of the facets (pipeline_pre_ppmi.py); empty list = corpus without facets
+    with open(f"../01_preprocessing/output/{kwic_variant}/facets_{kwic_variant}_{slice_grid}.json", encoding="utf-8") as _fh:
+        facets_declaration = _json.load(_fh)
+    facet_columns = [_f["column"] for _f in facets_declaration["facets"]]
+
+    cooc_counts_facets = (
+        pl.read_parquet(f"../01_preprocessing/output/{kwic_variant}/cooc_counts_facets_{kwic_variant}_{slice_grid}.parquet")
+        if facet_columns
+        else None
+    )
+    print(f"Facetten: {', '.join(_f['label'] for _f in facets_declaration['facets']) or 'keine'}")
+    cooc_counts_facets
+    return cooc_counts_facets, facet_columns, facets_declaration
+
+
+@app.cell
+def _(
+    S,
+    Vt,
+    context_slice_cooc_totals,
+    context_words,
+    cooc_counts_facets,
+    eig_p,
+    facet_columns,
+    k,
+    kwic_hits_sliced,
+    np,
+    pl,
+    slice_cooc_totals,
+    target_slice_cooc_totals,
+):
+    # "facet" (default): marginals per slice and facet value (sub-corpus, e.g. one publication in one
+    # half-year); "slice": marginals of the whole slice, only the row total is that of the record
+    RECORD_MARGINALS = "facet"
+    assert RECORD_MARGINALS in ("facet", "slice")
+
+    if not facet_columns:
+        records = pl.DataFrame(schema={"record_idx": pl.UInt32, "target_lemma": pl.Utf8, "slice": pl.Utf8, "n_hits": pl.UInt32})
+        record_vectors = np.zeros((0, k), dtype=np.float32)
+        n_facet_cells = 0
+    else:
+        _cell = ["slice", *facet_columns, "target_lemma"]
+
+        # the aggregate counts must be the sum over the facet values (same hits)
+        _sums = cooc_counts_facets.group_by(["slice", "target_lemma"]).agg(pl.col("n_cooc").sum())
+        _cmp = target_slice_cooc_totals.join(_sums, on=["slice", "target_lemma"], how="full", coalesce=True)
+        assert _cmp["n_cooc_target_slice"].eq_missing(_cmp["n_cooc"]).all(), "Facetten-Zählung passt nicht zur Aggregat-Zählung"
+
+        _rec = cooc_counts_facets.join(
+            cooc_counts_facets.group_by(_cell).agg(pl.col("n_cooc").sum().alias("n_cooc_row")), on=_cell
+        )
+        if RECORD_MARGINALS == "facet":
+            _base = ["slice", *facet_columns]
+            _rec = _rec.join(
+                cooc_counts_facets.group_by([*_base, "context_lemma"]).agg(pl.col("n_cooc").sum().alias("n_cooc_col")),
+                on=[*_base, "context_lemma"],
+            ).join(cooc_counts_facets.group_by(_base).agg(pl.col("n_cooc").sum().alias("n_cooc_total")), on=_base)
+        else:
+            _rec = _rec.join(
+                context_slice_cooc_totals.rename({"n_cooc_context_slice": "n_cooc_col"}), on=["slice", "context_lemma"]
+            ).join(slice_cooc_totals.rename({"n_cooc_slice": "n_cooc_total"}), on="slice")
+
+        # PPMI as for the aggregates; only positive values, only columns of the matrix (context_words)
+        _rec = (
+            _rec.with_columns(
+                (pl.col("n_cooc") / (pl.col("n_cooc_row") * pl.col("n_cooc_col") / pl.col("n_cooc_total")))
+                .log(2)
+                .clip(lower_bound=0)
+                .alias("ppmi")
+            )
+            .filter(pl.col("ppmi") > 0)
+            .join(context_words, on="context_lemma", how="inner")
+        )
+
+        # one row per facet cell with at least one positive PPMI value in the vocabulary
+        records = _rec.select(_cell).unique().sort(_cell).with_row_index("record_idx")
+        _rec = _rec.join(records, on=_cell)
+        record_vectors = fold_in(
+            _rec["record_idx"].to_numpy(),
+            _rec["context_idx"].to_numpy(),
+            _rec["ppmi"].to_numpy(),
+            records.height,
+            Vt[:k].T,
+            S[:k],
+            eig_p,
+        )
+
+        # n_hits per facet cell, counted before explode (as for the aggregates)
+        _hits = kwic_hits_sliced.group_by(_cell).len().rename({"len": "n_hits"}).collect(engine="streaming")
+        n_facet_cells = _hits.height
+        records = records.join(_hits, on=_cell, how="left").sort("record_idx")
+        assert records["n_hits"].null_count() == 0
+        assert (records["record_idx"].to_numpy() == np.arange(record_vectors.shape[0])).all()
+        assert (np.linalg.norm(record_vectors, axis=1) > 0).all()
+
+    print(
+        f"records: {records.height:,} Facetten-Zellen mit Vektor, "
+        f"{n_facet_cells - records.height:,} ohne positive PPMI-Spalte im Vokabular (kein Vektor), "
+        f"Bezugsgrößen: {RECORD_MARGINALS}"
+    )
+    records
+    return RECORD_MARGINALS, n_facet_cells, record_vectors, records
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
     ## Output
 
     Für das Postprocessing werden die unten genannten Dateien übergeben. Da die Numpy-Matrizen nur Vektoren als Zahlenwerte enthalten, sind in den Parquet-Dateien die Zeilen- bzw. Spaltenbeschriftungen sowie weitere Daten (<> Vektoren) enthalten.
@@ -494,8 +662,11 @@ def _(mo):
     * Kontextwörter
      * **context_vectors_[kwic_variant]_[slice_grid].npy**: Kontextwort-Vektoren (Zeile j gehört zu context_idx in context_words.parquet)
      * **context_words_[kwic_variant]_[slice_grid].parquet**: context_idx, Kontextwort, Belegung (in wie vielen Zeilen PPMI > 0, Summe der Kookkurrenzen) und häufigste Wortart
+    * Facetten-Zellen (records)
+     * **record_vectors_[kwic_variant]_[slice_grid].npy**: Vektoren der Facetten-Zellen, per folding-in im Raum der Aggregate (Zeile i gehört zu record_idx in records.parquet)
+     * **records_[kwic_variant]_[slice_grid].parquet**: record_idx, Zielwort, Zeitscheibe, Facettenwerte (facet_1, …) und Trefferzahl (n_hits). Ohne Facetten leer.
     * Metadaten
-     * **emb_meta_[kwic_variant]_[slice_grid].json**: Quelldatei, Zeitraster, k, p, der Frobenius-Anteil, die Mindesttrefferzahl für die SVD (min_hits_fit, null = alle Zeilen) und die Zahl der Zeilen in der SVD
+     * **emb_meta_[kwic_variant]_[slice_grid].json**: Quelldatei, Zeitraster, k, p, der Frobenius-Anteil, die Mindesttrefferzahl für die SVD (min_hits_fit, null = alle Zeilen), die Zahl der Zeilen in der SVD, die Facetten-Deklaration aus dem Preprocessing (facets) und die Bezugsgrößen der records (record_marginals)
 
     U, S und die vollständige Vt werden nicht gespeichert. Insbesondere Vt wäre mit (Zeilen × Kontextwörter) sehr groß, genutzt werden aber nur die ersten k Zeilen.
     """)
@@ -538,16 +709,21 @@ def _(kwic_hits_sliced, pl, ppmi_positive_indexed):
 @app.cell
 def _(
     MIN_HITS_FIT,
+    RECORD_MARGINALS,
     Vt,
     context_counts,
     context_pos_dominant,
     context_words,
     eig_p,
+    facets_declaration,
     is_fitted,
     k,
     kwic_variant,
+    n_facet_cells,
     np,
     pl,
+    record_vectors,
+    records,
     retained_frobenius_sq,
     slice_grid,
     target_slice_hits,
@@ -591,6 +767,8 @@ def _(
     np.save(f"output/{kwic_variant}/context_vectors_{kwic_variant}_{slice_grid}.npy", context_vectors)
     target_slices_export.write_parquet(f"output/{kwic_variant}/target_slices_{kwic_variant}_{slice_grid}.parquet")
     context_words_export.write_parquet(f"output/{kwic_variant}/context_words_{kwic_variant}_{slice_grid}.parquet")
+    np.save(f"output/{kwic_variant}/record_vectors_{kwic_variant}_{slice_grid}.npy", record_vectors)
+    records.write_parquet(f"output/{kwic_variant}/records_{kwic_variant}_{slice_grid}.parquet")
 
     emb_meta = {
         "kwic_variant": kwic_variant,
@@ -602,14 +780,40 @@ def _(
         "retained_frobenius_sq": float(retained_frobenius_sq),
         "min_hits_fit": MIN_HITS_FIT,
         "n_fitted_target_slices": int(is_fitted.sum()),
+        # facet declaration from pipeline_pre_ppmi.py (column, id, label, values with n_hits,
+        # replacement for missing values), passed on to pipeline_post.py for facets_schema
+        "facets": facets_declaration["facets"],
+        "facet_missing_value": facets_declaration["missing_value"],
+        # PPMI marginals of the records: "facet" = per slice and facet value, "slice" = per slice
+        "record_marginals": RECORD_MARGINALS,
+        "n_records": records.height,
+        # facet cells with hits but without a vector (no positive PPMI column in the vocabulary)
+        "n_records_without_vector": n_facet_cells - records.height,
     }
     with open(f"output/{kwic_variant}/emb_meta_{kwic_variant}_{slice_grid}.json", "w", encoding="utf-8") as _f:
         json.dump(emb_meta, _f, indent=2)
 
-    print(f"target_slice_vectors: {target_slice_vectors.shape}, context_vectors: {context_vectors.shape}")
+    print(
+        f"target_slice_vectors: {target_slice_vectors.shape}, context_vectors: {context_vectors.shape}, "
+        f"record_vectors: {record_vectors.shape}"
+    )
     print(f"Kontextwörter ohne POS: {context_words_export['pos'].null_count()}")
+
+    # everything pipeline_post.py reads, for the copy switch at the end
+    emb_output_files = [
+        f"output/{kwic_variant}/{_stem}_{kwic_variant}_{slice_grid}.{_ext}"
+        for _stem, _ext in [
+            ("target_slice_vectors", "npy"),
+            ("context_vectors", "npy"),
+            ("target_slices", "parquet"),
+            ("context_words", "parquet"),
+            ("record_vectors", "npy"),
+            ("records", "parquet"),
+            ("emb_meta", "json"),
+        ]
+    ]
     emb_meta
-    return
+    return (emb_output_files,)
 
 
 @app.cell(hide_code=True)
@@ -678,6 +882,36 @@ def _(np, pl, slice_grid, target_slice_vectors, target_slices):
         pl.Series("cosine", target_slice_cosines[example_i][neighbor_idx]).round(3)
     )
     target_slice_neighbors
+    return
+
+
+@app.cell
+def _(mo):
+    copy_switch = mo.ui.switch(
+        value=True,
+        label="Nach 03_postprocessing/input kopieren (sonst nur output/)",
+    )
+    copy_switch
+    return (copy_switch,)
+
+
+@app.cell
+def _(copy_switch, emb_output_files, kwic_variant):
+    # copy to the input of the next stage
+    # output/ is this stage's workbench, ../03_postprocessing/input/<kwic_variant>/ is
+    # what pipeline_post.py works on. The files of the current run (kwic_variant,
+    # slice_grid) are copied.
+    import shutil as _shutil
+    from pathlib import Path as _Path
+
+    if copy_switch.value:
+        _next_dir = _Path(f"../03_postprocessing/input/{kwic_variant}")
+        _next_dir.mkdir(parents=True, exist_ok=True)
+        for _src in emb_output_files:
+            _shutil.copy2(_src, _next_dir / _Path(_src).name)
+            print(f"kopiert nach {_next_dir / _Path(_src).name}")
+    else:
+        print("nicht kopiert (Schalter aus) - liegt nur in output/")
     return
 
 

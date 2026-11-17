@@ -159,10 +159,18 @@ def _(Path, corpus_source, pl, re):
     #   id None = no id in the source, a running number from 1 is added
     # - prepare_corpus: selection and renaming for the lazy table (preview, checks, speaker names)
     # - speaker_facet: facet with the speaker names, None = corpus without speakers
+    # - bundle_facets: facets that become facet axes in the bundle (facets_schema, records);
+    #   "column" = name in the lazy table and in the hits, "source" = column in the source CSV,
+    #   "id"/"label" = axis in the bundle. The speaker facet is deliberately not one of them
+    #   (hundreds of values; it only feeds speaker_names.csv).
+    # Missing facet values (empty, "NA") get MISSING_FACET_VALUE: they stay visible as a value of
+    # their own in the bundle and are never filtered out.
+    MISSING_FACET_VALUE = "nicht zugeordnet"
     if corpus_source.value == "bundestag":
         corpus_files = ["input/CPP-BT_2026-01-17_DE_CSV_Reden_Gesamt.csv"]
         source_columns = {"id": "rede_id", "date": "sitzung_datum", "text": "rede_text"}
         speaker_facet = "facet_2"
+        bundle_facets = [{"column": "facet_1", "source": "redner_fraktion", "id": "fraktion", "label": "Fraktion"}]
 
         def prepare_corpus(lf):
             # define colums of interest from original CSV
@@ -206,6 +214,7 @@ def _(Path, corpus_source, pl, re):
         )
         source_columns = {"id": None, "date": "date", "text": "text"}
         speaker_facet = None
+        bundle_facets = [{"column": "facet_1", "source": "facet_1", "id": "publication", "label": "Publikation"}]
 
         def prepare_corpus(lf):
             return lf.select("date", "text", "facet_1")
@@ -213,8 +222,20 @@ def _(Path, corpus_source, pl, re):
     assert corpus_files and all(Path(_f).is_file() for _f in corpus_files), (
         f"Korpusdateien nicht gefunden: {corpus_files or 'keine'}"
     )
+    # column names in the hits; facet columns must not collide with the columns of the hits
+    facet_columns = [_f["column"] for _f in bundle_facets]
+    assert len(set(facet_columns)) == len(facet_columns) and all(_c.startswith("facet_") for _c in facet_columns)
     print(f"{len(corpus_files)} Korpusdatei(en): {', '.join(corpus_files)}")
-    return corpus_files, prepare_corpus, source_columns, speaker_facet
+    print(f"Facetten im Bundle: {', '.join(f'{_f['label']} ({_f['column']})' for _f in bundle_facets) or 'keine'}")
+    return (
+        MISSING_FACET_VALUE,
+        bundle_facets,
+        corpus_files,
+        facet_columns,
+        prepare_corpus,
+        source_columns,
+        speaker_facet,
+    )
 
 
 @app.cell
@@ -603,9 +624,12 @@ def _(
 
 
 @app.function
-def read_corpus_rows(files, id_col, date_col, text_col, on_progress=None, normalize=None):
+def read_corpus_rows(files, id_col, date_col, text_col, on_progress=None, normalize=None, facet_cols=()):
     """
-    Yield (id, date, text) for every row of the corpus CSV files, one row at a time.
+    Yield (id, date, text, facets) for every row of the corpus CSV files, one row at a time.
+
+    facets is a tuple with the values of the source columns facet_cols, in that order (None
+    if missing); empty tuple without facet_cols.
 
     normalize(text) is applied to every non-empty text before it is yielded (character
     normalization, see normalize_chars in pipeline_pre_dataimport.py).
@@ -629,6 +653,7 @@ def read_corpus_rows(files, id_col, date_col, text_col, on_progress=None, normal
             header = next(reader)
             i_date, i_text = header.index(date_col), header.index(text_col)
             i_id = header.index(id_col) if id_col else None
+            i_facets = [header.index(c) for c in facet_cols]
             position = 0
             for row in reader:
                 if i_id is None:
@@ -637,9 +662,10 @@ def read_corpus_rows(files, id_col, date_col, text_col, on_progress=None, normal
                     doc_id = None if row[i_id] in missing else row[i_id]
                 date = None if row[i_date] in missing else row[i_date]
                 text = None if row[i_text] in missing else row[i_text]
+                facets = tuple(None if row[i] in missing else row[i] for i in i_facets)
                 if text and normalize:
                     text = normalize(text)
-                yield doc_id, date, text
+                yield doc_id, date, text, facets
                 if on_progress:
                     # position of the underlying byte stream; advances in blocks of the read buffer
                     new_position = raw.tell()
@@ -649,12 +675,13 @@ def read_corpus_rows(files, id_col, date_col, text_col, on_progress=None, normal
 
 
 @app.function
-def write_kwic_hits(rows, extract, out_path, batch_size=100_000):
+def write_kwic_hits(rows, extract, out_path, batch_size=100_000, facet_names=()):
     """
-    Run the KWIC extraction over (id, date, text) rows and write all hits to one CSV file.
+    Run the KWIC extraction over (id, date, text, facets) rows and write all hits to one CSV file.
 
     The hits are written in batches of `batch_size`, so only one batch is held in memory.
-    Each hit also gets the date of its document; later steps then need no join with the corpus.
+    Each hit also gets the date and the facet values of its document (columns facet_names, in
+    the order of the facets tuple); later steps then need no join with the corpus.
     The file is first written as *.part and renamed when complete, so an aborted run leaves no
     truncated CSV under the final name. Returns (number of documents, number of hits).
     """
@@ -666,12 +693,13 @@ def write_kwic_hits(rows, extract, out_path, batch_size=100_000):
     part_path = out_path.with_name(out_path.name + ".part")
     n_docs, n_hits, hits, header = 0, 0, [], True
     with part_path.open("wb") as fh:
-        for doc_id, date, text in rows:
+        for doc_id, date, text, facets in rows:
             n_docs += 1
             if not text:
                 continue
             for hit in extract(doc_id, text):
                 hit["date"] = date
+                hit.update(zip(facet_names, facets))
                 hits.append(hit)
             if len(hits) >= batch_size:
                 pl.DataFrame(hits).write_csv(fh, include_header=header)
@@ -680,7 +708,8 @@ def write_kwic_hits(rows, extract, out_path, batch_size=100_000):
             pl.DataFrame(hits).write_csv(fh, include_header=header)
             n_hits, header = n_hits + len(hits), False
         if header:  # no hits at all: header only
-            fh.write(b"id,target_form,position,context_before,context_after,sentence_based,date\n")
+            columns = ["id", "target_form", "position", "context_before", "context_after", "sentence_based", "date"]
+            fh.write((",".join([*columns, *facet_names]) + "\n").encode("utf-8"))
     part_path.replace(out_path)
     return n_docs, n_hits
 
@@ -688,6 +717,7 @@ def write_kwic_hits(rows, extract, out_path, batch_size=100_000):
 @app.cell
 def _(
     Path,
+    bundle_facets,
     corpus_files,
     kwic_extract,
     kwic_variant,
@@ -725,9 +755,13 @@ def _(
             # soft hyphens, non-breaking hyphens, invisible characters etc.; the Bundestag CSV
             # does not pass through pipeline_pre_dataimport.py, so the same step is applied here
             normalize=normalize_chars,
+            # facet values of the document (e.g. parliamentary group, publication), written with every hit
+            facet_cols=[_f["source"] for _f in bundle_facets],
         )
         # same file name as read below (kwic_variant includes the window size)
-        _n_docs, _n_hits = write_kwic_hits(_rows, kwic_extract, _out)
+        _n_docs, _n_hits = write_kwic_hits(
+            _rows, kwic_extract, _out, facet_names=[_f["column"] for _f in bundle_facets]
+        )
 
     print(f"{_n_docs:,} Dokumente, {_n_hits:,} Treffer, gespeichert: {_out}")
     pl.read_csv(_out, n_rows=100, null_values="NA")
@@ -1429,13 +1463,22 @@ def _(mo):
 
 
 @app.function
-def slice_kwic_hits(kwic_hits_lemmatized, corpus, slice_grid):
+def slice_kwic_hits(kwic_hits_lemmatized, corpus, slice_grid, facet_columns=(), missing_value="nicht zugeordnet"):
     """
     Add the date (as date) and the time slice label to the lemmatized hits; lazy in, lazy out.
 
     Slice labels sort alphabetically in chronological order ("2018-Q1", "2018-H2", "2018").
+    The facet columns (written by the KWIC extraction) are kept as strings; missing values
+    (null, empty) become missing_value, so no hit drops out of the facet-resolved counts.
     """
     import polars as pl
+
+    missing_cols = set(facet_columns) - set(kwic_hits_lemmatized.collect_schema().names())
+    assert not missing_cols, f"Facettenspalten fehlen in den Treffern: {missing_cols} (KWIC-Extraktion neu starten)"
+    kwic_hits_lemmatized = kwic_hits_lemmatized.with_columns(
+        pl.col(c).cast(pl.Utf8).str.strip_chars().replace("", None).fill_null(missing_value)
+        for c in facet_columns
+    )
 
     if "date" in kwic_hits_lemmatized.collect_schema().names():
         # date written by the KWIC extraction; moved to the end, where the join below puts it too
@@ -1466,11 +1509,22 @@ def slice_kwic_hits(kwic_hits_lemmatized, corpus, slice_grid):
 
 
 @app.cell
-def _(Path, corpus, kwic_hits_contexts, kwic_variant, pl, slice_grid_picker):
+def _(
+    MISSING_FACET_VALUE,
+    Path,
+    corpus,
+    facet_columns,
+    kwic_hits_contexts,
+    kwic_variant,
+    pl,
+    slice_grid_picker,
+):
     # add Quartale, Halbjahre and Jahre to the lists, which up to now only have dates
     # lazy: the plan is written to parquet in streaming mode and also used for the counts below
     # (kwic_hits_contexts = lemmatized hits, feminine context lemmas reduced to the base form)
-    kwic_hits_sliced = slice_kwic_hits(kwic_hits_contexts, corpus, slice_grid_picker.value)
+    kwic_hits_sliced = slice_kwic_hits(
+        kwic_hits_contexts, corpus, slice_grid_picker.value, facet_columns, MISSING_FACET_VALUE
+    )
 
     _path = Path(f"output/{kwic_variant}/kwic_hits_sliced_{kwic_variant}_{slice_grid_picker.value}.parquet")
     _tmp = _path.with_name(_path.stem + ".tmp.parquet")
@@ -1495,9 +1549,10 @@ def _(mo):
 
 
 @app.function
-def count_cooc(kwic_hits_sliced):
+def count_cooc(kwic_hits_sliced, facet_columns=()):
     """
-    Cooccurrence counts per slice, target lemma and context lemma, from the lazy sliced hits.
+    Cooccurrence counts per slice, facet values, target lemma and context lemma, from the lazy
+    sliced hits. Without facet_columns: per slice, target lemma and context lemma.
 
     The streaming engine counts batch by batch, so the exploded list (one row per context
     word of every hit) never exists as a whole in memory.
@@ -1506,30 +1561,97 @@ def count_cooc(kwic_hits_sliced):
     # only the columns needed for the count are exploded; the POS tags (exploded in parallel
     # before) do not change the number of rows
     # empty contexts may occur (e.g. in case of one-word-headlines treated as one KWIC hit). empty_as_null=False excludes them from the list - they don't contribute to occurences anyway.
+    keys = ["slice", *facet_columns, "target_lemma"]
     return (
         kwic_hits_sliced
-        .select("slice", "target_lemma", "context_lemmas")
+        .select(*keys, "context_lemmas")
         .explode("context_lemmas", empty_as_null=False)
-        # group by target word, context word and slice
-        .group_by(["slice", "target_lemma", "context_lemmas"])
+        # group by target word, context word and slice (and facet values)
+        .group_by([*keys, "context_lemmas"])
         .len()
         .rename({"context_lemmas": "context_lemma", "len": "n_cooc"})
         .collect(engine="streaming")
     )
 
 
-@app.cell
-def _(kwic_hits_sliced):
-    cooc_counts = count_cooc(kwic_hits_sliced)
-    cooc_counts
-    return (cooc_counts,)
-
-
-@app.cell
-def _(cooc_counts, kwic_variant, slice_grid_picker):
-    cooc_counts.write_csv(f"output/{kwic_variant}/cooc_counts_{kwic_variant}_{slice_grid_picker.value}.csv")
-    print(f"Gespeichert: output/{kwic_variant}/cooc_counts_{kwic_variant}_{slice_grid_picker.value}.csv")
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    **Facetten.** Gezählt wird zusätzlich je Facettenwert (z. B. Fraktion oder Publikation; welche Facetten das sind, steht in der Korpus-Konfiguration unter „Einlesen der Daten“). Die Zählung je Zielwort und Zeitscheibe ist die Summe über alle Facettenwerte. Treffer ohne Facettenwert zählen als eigener Wert („nicht zugeordnet“), damit beide Zählungen dieselben Treffer enthalten. Die facettenaufgelösten Zählungen gehen nicht in die SVD ein. Im Embedding werden aus ihnen die Vektoren der Facetten-Zellen (records) berechnet und in den Raum der Aggregate projiziert.
+    """)
     return
+
+
+@app.cell
+def _(facet_columns, kwic_hits_sliced, pl):
+    # counts per facet value; the counts per target word and slice are their sum (every hit has
+    # exactly one value per facet, missing ones were set to MISSING_FACET_VALUE when slicing)
+    cooc_counts_facets = count_cooc(kwic_hits_sliced, facet_columns)
+    cooc_counts = (
+        cooc_counts_facets
+        .group_by(["slice", "target_lemma", "context_lemma"])
+        .agg(pl.col("n_cooc").sum())
+    )
+    assert cooc_counts["n_cooc"].sum() == cooc_counts_facets["n_cooc"].sum()
+
+    # facet values with their number of hits, for facets_schema in the bundle; most frequent first,
+    # because the frontend assigns its colors in this order
+    facet_values = {
+        _c: (
+            kwic_hits_sliced.group_by(_c).len().collect(engine="streaming")
+            .sort(["len", _c], descending=[True, False])
+            .rename({_c: "id", "len": "n_hits"})
+            .to_dicts()
+        )
+        for _c in facet_columns
+    }
+    cooc_counts
+    return cooc_counts, cooc_counts_facets, facet_values
+
+
+@app.cell
+def _(
+    MISSING_FACET_VALUE,
+    Path,
+    bundle_facets,
+    cooc_counts,
+    cooc_counts_facets,
+    facet_values,
+    kwic_variant,
+    slice_grid_picker,
+):
+    import json as _json
+
+    _name = f"{kwic_variant}_{slice_grid_picker.value}"
+    cooc_counts.write_csv(f"output/{kwic_variant}/cooc_counts_{_name}.csv")
+    print(f"Gespeichert: output/{kwic_variant}/cooc_counts_{_name}.csv")
+
+    # facet-resolved counts and the declaration of the facets, read by pipeline_emb_ppmi.py;
+    # an empty facet list means: corpus without facets, no records in the bundle
+    _facets_path = Path(f"output/{kwic_variant}/cooc_counts_facets_{_name}.parquet")
+    if bundle_facets:
+        cooc_counts_facets.write_parquet(_facets_path)
+        print(f"Gespeichert: {_facets_path}")
+    else:
+        _facets_path.unlink(missing_ok=True)
+    _declaration = {
+        "missing_value": MISSING_FACET_VALUE,
+        "facets": [{**_f, "values": facet_values[_f["column"]]} for _f in bundle_facets],
+    }
+    with open(f"output/{kwic_variant}/facets_{_name}.json", "w", encoding="utf-8") as _fh:
+        _json.dump(_declaration, _fh, ensure_ascii=False, indent=2)
+    print(f"Gespeichert: output/{kwic_variant}/facets_{_name}.json")
+    for _f in _declaration["facets"]:
+        print(f"  {_f['label']}: " + ", ".join(f"{_v['id']} ({_v['n_hits']:,})" for _v in _f["values"]))
+
+    # everything pipeline_emb_ppmi.py reads, for the copy switch at the end
+    pre_output_files = [
+        f"output/{kwic_variant}/cooc_counts_{_name}.csv",
+        f"output/{kwic_variant}/kwic_hits_sliced_{_name}.parquet",
+        f"output/{kwic_variant}/facets_{_name}.json",
+        *([str(_facets_path)] if bundle_facets else []),
+    ]
+    return (pre_output_files,)
 
 
 @app.cell(hide_code=True)
@@ -1550,11 +1672,42 @@ def _(mo):
     Als Ergebnis des Pre-Processing werden pro KWIC-Extraktionsmethode (40-Zeichen-Fenster, NLTK Punkt und Somajo) die folgenden Dateien erzeugt:
 
     * speaker_names.csv: Extrahierte Redner-Namen, für spätere Filter-Vorbereitung: 1 Datei. Bei Korpora ohne Redner (Zeitschriften) nur die Kopfzeile.
-    * kwic_hits_[kwic_variant]].csv: Treffer pro Zielwort, mit Kontext vor, Kontext nach, Zielwort und Datum des Dokuments. Für 3 KWIC-Varianten  bis zu 3 Dateien. (Ältere Dateien ohne Datumsspalte funktionieren weiter; das Datum kommt dann über die ID aus dem Korpus.)
+    * kwic_hits_[kwic_variant]].csv: Treffer pro Zielwort, mit Kontext vor, Kontext nach, Zielwort, Datum und Facettenwerten (facet_1, …) des Dokuments. Für 3 KWIC-Varianten  bis zu 3 Dateien. (Ältere Dateien ohne Datumsspalte funktionieren weiter; das Datum kommt dann über die ID aus dem Korpus. Ohne Facettenspalten bricht das Slicing ab: Extraktion neu starten.)
     * kwic_hits_lemmatized_stanza_[kwic_variant].parquet: Lemmatisierte Version der kwic_hits_[kwic_variant]].csv. Standardmäßg wird NLTK Stanza für die Lemmatisierung verwendet. Code für spaCy ist enthalten, aber deaktiviert. Für 3 KWIC-Varianten  bis zu 3 Dateien.
     * kwic_hits_sliced_[kwic_variant]_[slice_grid].parquet: Pro Zeitscheibe aggregierte Version der vorigen Ausgabe: Größere Textmenge bietet mehr Kookkurenzen. Für 3 KWIC-Varianten und 3 Slice-Größen bis zu 9 Dateien.
     * cooc_counts_[kwic_variant]_[slice_grid]: Kookkurenzen für Slice x Zielwort x Kontextwort. Für 3 KWIC-Varianten und 3 Slice-Größen bis zu 9 Dateien.
+    * cooc_counts_facets_[kwic_variant]_[slice_grid].parquet: dieselben Kookkurrenzen, zusätzlich aufgeteilt nach Facettenwert (Spalten facet_1, …). Nur bei Korpora mit Facetten.
+    * facets_[kwic_variant]_[slice_grid].json: Deklaration der Facetten für das Bundle (Spalte, ID, Bezeichnung, Werte mit Trefferzahl, Ersatzwert für fehlende Angaben). Leere Liste = Korpus ohne Facetten.
     """)
+    return
+
+
+@app.cell
+def _(mo):
+    copy_switch = mo.ui.switch(
+        value=True,
+        label="Nach 02_embedding/input kopieren (sonst nur output/)",
+    )
+    copy_switch
+    return (copy_switch,)
+
+
+@app.cell
+def _(Path, copy_switch, kwic_variant, pre_output_files):
+    # copy to the input of the next stage
+    # output/ is this stage's workbench, ../02_embedding/input/<kwic_variant>/ is what
+    # pipeline_emb_ppmi.py works on. The files of the current run (kwic_variant,
+    # slice_grid) are copied.
+    import shutil
+
+    if copy_switch.value:
+        _next_dir = Path(f"../02_embedding/input/{kwic_variant}")
+        _next_dir.mkdir(parents=True, exist_ok=True)
+        for _src in pre_output_files:
+            shutil.copy2(_src, _next_dir / Path(_src).name)
+            print(f"kopiert nach {_next_dir / Path(_src).name}")
+    else:
+        print("nicht kopiert (Schalter aus) - liegt nur in output/")
     return
 
 

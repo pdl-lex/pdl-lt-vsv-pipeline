@@ -102,8 +102,11 @@ def _(mo):
     * Kontextwörter
      * **context_vectors_[kwic_variant]_[slice_grid].npy**: Kontextwort-Vektoren (Zeile j gehört zu context_idx in context_words.parquet)
      * **context_words_[kwic_variant]_[slice_grid].parquet**: context_idx, Kontextwort, Belegung (in wie vielen Zeilen PPMI > 0, Summe der Kookkurrenzen) und häufigste Wortart
+    * Facetten-Zellen (records)
+     * **record_vectors_[kwic_variant]_[slice_grid].npy**: Vektoren je Zielwort, Zeitscheibe und Facettenwert (Zeile i gehört zu record_idx in records.parquet)
+     * **records_[kwic_variant]_[slice_grid].parquet**: record_idx, Zielwort, Zeitscheibe, Facettenwerte und Trefferzahl (n_hits)
     * Metadaten
-     * **emb_meta_[kwic_variant]_[slice_grid].json**: Quelldatei, Zeitraster, k, p und der Frobenius-Anteil
+     * **emb_meta_[kwic_variant]_[slice_grid].json**: Quelldatei, Zeitraster, k, p, der Frobenius-Anteil und die Facetten-Deklaration (facets)
 
     Möchte man verschiedene Outputs für verschiedene Varianten erzeugen, muss der embedding-Schritt mehrfach durchlaufen werden.
 
@@ -187,6 +190,17 @@ def _(json, kwic_variant, slice_grid):
 
     print(emb_meta)
     return (emb_meta,)
+
+
+@app.cell
+def _(kwic_variant, np, pl, slice_grid):
+    # facet cells (records): one row per target word, slice and facet value, vectors by folding-in
+    # into the space of the aggregates (see pipeline_emb_ppmi.py, "Facetten-Zellen"); empty without facets
+    record_vectors = np.load(f"../02_embedding/output/{kwic_variant}/record_vectors_{kwic_variant}_{slice_grid}.npy")
+    records = pl.read_parquet(f"../02_embedding/output/{kwic_variant}/records_{kwic_variant}_{slice_grid}.parquet")
+    assert (records["record_idx"].to_numpy() == np.arange(record_vectors.shape[0])).all()
+    records
+    return record_vectors, records
 
 
 @app.cell
@@ -405,8 +419,74 @@ def _(
 def _(mo):
     mo.md(r"""
     Hinweis: Die Benennung "aggregates" bezieht sich darauf, dass die Facetten nicht aufgelöst, sondern aggregiert werden.
+
+    ### Facetten-Zellen (records)
+    Die records sind dieselben Zellen, zusätzlich aufgeteilt nach Facettenwert (Fraktion, Publikation): Zielwort × Zeitscheibe × Facettenwert. Ihre Vektoren stammen aus dem Embedding (folding-in in den Raum der Aggregate). Hier werden sie wie die Aggregate auf Länge 1 normiert und mit denselben PCA-Achsen projiziert, ohne neuen Fit. Sie bestimmen die Achsen also nicht mit, und Aggregate und records liegen in einem gemeinsamen Koordinatenraum.
+
+    Die Facetten-Achsen (`facets_schema`) kommen aus der Deklaration des Preprocessing. Die Werte stehen in der Reihenfolge ihrer Trefferzahl, weil das Frontend seine Farben in dieser Reihenfolge vergibt. Treffer ohne Facettenwert bilden einen eigenen Wert („nicht zugeordnet“) und werden wie alle anderen angezeigt.
+
+    Die records tragen im Bundle nur `coords_3d`, `freq` und `facets`, keinen `vector` (laut Schema optional). Das Frontend nutzt für die records nur die Koordinaten. Mit Vektoren wüchse das Bundle beim Zeitungskorpus (rund 600 Zielwörter × 30 Halbjahre × 23 Titel) auf eine Größenordnung von 1 GB. Die Vektoren stehen in `record_vectors_*.npy` im Embedding-Output.
     """)
     return
+
+
+@app.cell
+def _(
+    emb_meta,
+    np,
+    pca_axes,
+    pca_mean,
+    pl,
+    record_vectors,
+    records,
+    targets,
+    time_slices,
+):
+    # facet axes for the bundle, from the declaration of pipeline_pre_ppmi.py (via emb_meta)
+    facets_schema = [
+        {
+            "id": _f["id"],
+            "label": _f["label"],
+            "type": "categorical",
+            # value id = value in the corpus; n_hits is not in the schema, but facet values are .passthrough()
+            "values": [{"id": _v["id"], "label": _v["id"], "n_hits": _v["n_hits"]} for _v in _f["values"]],
+        }
+        for _f in emb_meta["facets"]
+    ]
+    _axis_of_column = {_f["column"]: _f["id"] for _f in emb_meta["facets"]}
+
+    # same normalization, pca_mean and pca_axes as the aggregates, no new fit
+    record_vectors_unit = record_vectors / np.maximum(np.linalg.norm(record_vectors, axis=1, keepdims=True), 1e-12)
+    record_coords = (record_vectors_unit - pca_mean) @ pca_axes.T
+
+    bundle_records = (
+        records.with_columns(pl.Series("coords_3d", record_coords.tolist()))
+        .with_columns(
+            pl.col("target_lemma").alias("entity_id"),
+            pl.col("slice").alias("time_slice_id"),
+            pl.struct([pl.col(_c).alias(_a) for _c, _a in _axis_of_column.items()]).alias("facets")
+            if _axis_of_column
+            else pl.lit(None).alias("facets"),
+        )
+        .select(["entity_id", "time_slice_id", "facets", "coords_3d", pl.col("n_hits").alias("freq")])
+    )
+
+    # every record must refer to an entity and a time slice of the bundle; with "facet" marginals
+    # a record can (rarely) have positive PPMI where its aggregate has none, its entity or slice may
+    # then be missing from the bundle
+    _known = bundle_records["entity_id"].is_in(targets["id"].implode()) & bundle_records["time_slice_id"].is_in(
+        time_slices["id"].implode()
+    )
+    if not _known.all():
+        print(f"{(~_known).sum()} records ohne Zielwort bzw. Zeitscheibe im Bundle, nicht übernommen")
+        bundle_records = bundle_records.filter(_known)
+
+    print(
+        f"{bundle_records.height:,} records, Facetten: "
+        + (", ".join(f"{_f['label']} ({len(_f['values'])} Werte)" for _f in facets_schema) or "keine")
+    )
+    bundle_records
+    return bundle_records, facets_schema
 
 
 @app.cell(hide_code=True)
@@ -1220,7 +1300,9 @@ def _(
     bundle_aggregates,
     bundle_base,
     bundle_neighbor_coords,
+    bundle_records,
     emb_meta,
+    facets_schema,
     json,
     kwic_variant,
     neighbor_space_meta,
@@ -1294,12 +1376,24 @@ def _(
         {
             "entity_id": row["entity_id"],
             "time_slice_id": row["time_slice_id"],
-            "facets": {},  # currently still empty due to too little data
+            "facets": {},  # aggregate: over all facet values
             "vector": round_values(row["vector"]),
             "coords_3d": round_values(row["coords_3d"], 4),
             "freq": int(row["freq"]),
         }
         for row in bundle_aggregates.iter_rows(named=True)
+    ]
+
+    # records without vector, see "Facetten-Zellen (records)"
+    bundle_records_json = [
+        {
+            "entity_id": row["entity_id"],
+            "time_slice_id": row["time_slice_id"],
+            "facets": row["facets"],
+            "coords_3d": round_values(row["coords_3d"], 4),
+            "freq": int(row["freq"]),
+        }
+        for row in bundle_records.iter_rows(named=True)
     ]
 
     bundle_anchors_json = [
@@ -1326,12 +1420,12 @@ def _(
     # assembly
     bundle = {
         "meta": bundle_meta,
-        "facets_schema": [],  # comes with the records (e.g. parliamentary group)
+        "facets_schema": facets_schema,  # declared in pipeline_pre_ppmi.py (e.g. parliamentary group, publication)
         "entities": targets.to_dicts(),
         "time_slices": time_slices.to_dicts(),
         "anchors": bundle_anchors_json,
         "neighbor_coords": bundle_neighbor_coords_json,
-        "records": [],  # deliberately empty
+        "records": bundle_records_json,
         "aggregates": bundle_aggregates_json,
         "neighbors": neighbors,
     }
@@ -1352,6 +1446,7 @@ def _(
     print(f"Raster {slice_grid}, vector_dim {bundle_vector_dim}")
     print(
         f"{len(bundle['aggregates'])} aggregates, "
+        f"{len(bundle['records']):,} records, "
         f"{len(bundle['anchors'])} anchors, "
         f"{len(bundle['neighbor_coords']):,} neighbor_coords, "
         f"{n_neighbor_entries:,} Nachbar-Einträge, "

@@ -452,15 +452,19 @@ def _(mo):
     Aufschluss darüber gibt das Notebook `pipeline_emb_ppmi_diagnose.py` (Abschnitt "Rang k der SVD und Exponent p
     der Eigenwertgewichtung").
 
-    Die in der folgenden Zelle gesetzten Werte sind ein vorläufiger Stand.
+    Die in der folgenden Zelle gesetzten Werte (k = 300, p = 0,5) sind mit Abschnitt 3 des Diagnose-Notebooks
+    auf punkt/halfyear bestimmt (2026-11-17, Methodology 1.8). Für ein anderes Korpus, Raster oder eine andere
+    KWIC-Variante sind sie neu zu bestimmen.
     """)
     return
 
 
 @app.cell
 def _(MIN_HITS_FIT, S, U, Vt, ppmi_matrix):
-    k = 100
-    eig_p = 1
+    # determined with pipeline_emb_ppmi_diagnose.py, section 3 (punkt/halfyear, 2026-11-17); see
+    # "internal/Readme Scientific Methodology.md", 1.8
+    k = 300
+    eig_p = 0.5
 
     # row vector = U_k * S_k**p (eigenvalue weighting, Caron 2001)
     # p = 1 weights each dimension by its full singular value; p = 0.5 reduces the weight

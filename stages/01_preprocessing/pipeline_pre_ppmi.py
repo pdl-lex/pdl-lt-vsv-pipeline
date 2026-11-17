@@ -302,7 +302,7 @@ def _(mo):
         inline=True,
     )
     window_size = mo.ui.slider(
-        10, 100, value=40, step=5, label="Fenster (Wörter)", show_value=True
+        10, 100, value=20, step=5, label="Fenster (Wörter)", show_value=True
     )
     run = mo.ui.run_button(label="Extraktion starten")
 
@@ -398,6 +398,8 @@ def _(assets_dir, re, strip_punctuation, target_forms):
     somajo = SoMaJo(
         "de_CMC", split_camel_case=False, character_offsets=True
     )  # load German CMC model (computer-mediated communication)
+    from bisect import bisect_left, bisect_right
+
     TOKEN = re.compile(r"\S+")  # token = any sequence of non-whitespace characters
     collapse_whitespace = lambda s: re.sub(r"\s+", " ", s).strip()  # whitespace normalization
 
@@ -409,14 +411,19 @@ def _(assets_dir, re, strip_punctuation, target_forms):
         for sent in somajo.tokenize_text([snip]):
             yield sent[0].character_offset[0], sent[-1].character_offset[1]
 
-    def kwic_sentence(doc_id, text, spans=punkt_spans, pad=600, max_len=400, fb=250):
+    def kwic_sentence(doc_id, text, spans=punkt_spans, pad=600, max_words=20):
         """
         Extract keyword-in-context (KWIC) entries for all target words in a text.
 
         For each whitespace-separated token whose normalized form is in `target_forms`,
-        the surrounding sentence is determined with the given segmenter. If no
-        acceptable sentence is found (not found, truncated by the window border, or
-        longer than `max_len`), a fixed character window around the hit is used instead.
+        the surrounding sentence is determined with the given segmenter. The context is
+        that sentence, clipped to at most `max_words` whitespace tokens on each side of
+        the hit (DNB requirement: max. 20 words before and after the hit). Long sentences
+        are therefore clipped, not discarded. A sentence border that only results from
+        the border of the working window is ignored on that side (the clip applies).
+        If the segmenter yields no sentence containing the hit, the fallback is
+        `max_words` tokens on each side without sentence borders.
+        Only whole tokens are taken; tokens crossing a sentence border are left out.
 
         Parameters
         ----------
@@ -430,10 +437,8 @@ def _(assets_dir, re, strip_punctuation, target_forms):
         pad : int, default 600
             Half-width (in characters) of the working window around a hit that is
             passed to the segmenter, instead of segmenting the whole text.
-        max_len : int, default 400
-            Maximum accepted sentence length in characters.
-        fb : int, default 250
-            Half-width (in characters) of the fallback context window.
+        max_words : int, default 20
+            Maximum number of whitespace tokens on each side of the hit.
 
         Returns
         -------
@@ -444,49 +449,51 @@ def _(assets_dir, re, strip_punctuation, target_forms):
             - "position": token index in the document
             - "context_before": cleaned text before the hit (hit excluded)
             - "context_after": cleaned text after the hit (hit excluded)
-            - "sentence_based": True if a full sentence was used, False if fallback
+            - "sentence_based": True if a sentence was found (possibly clipped),
+              False if fallback
 
         Notes
         -----
         Requires the globals `target_forms` (set of target words) and `strip_punctuation()`.
         """
+        toks = [m.span() for m in TOKEN.finditer(text)]  # (start, end) of all whitespace tokens
+        starts = [s for s, _ in toks]
+        ends = [e for _, e in toks]
         hits = []
-        for i, m in enumerate(
-            TOKEN.finditer(text)
-        ):  # iterate over whitespace-separated tokens; i = token index, m = match object
-            word = strip_punctuation(m.group())  # remove punctuation at the edges
+        for i, (hs, he) in enumerate(toks):  # i = token index, hs/he = start/end of the token
+            word = strip_punctuation(text[hs:he])  # remove punctuation at the edges
             if word not in target_forms:  # check if found word is one of the target forms
                 continue
-            hs, he = m.span()  # starting and end positions
             lo, hi = (
                 max(0, hs - pad),
                 min(len(text), he + pad),
             )  # define a segmentation window around current word
             snip = text[lo:hi]  # save text in window to snip
-            span = None  # initialize with none for each hit, gets overwritten if a sentence is found
+            a, b = 0, len(text)  # sentence borders; default: none (fallback)
+            sentence_based = False
             for s, e in spans(
                 snip
             ):  # iterate over all sentences in current window until a match is found
                 if s <= hs - lo < e:  # position of the found word must be within bounds
-                    cut = (
-                        (s == 0 and lo > 0) or (e == len(snip) and hi < len(text))
-                    )  # sentence touches the window border (but the window is not at the text border) -> possibly truncated
-                    if (
-                        not cut and e - s <= max_len
-                    ):  # accepted if not cut and within max length
-                        span = (lo + s, lo + e)
+                    sentence_based = True
+                    # a sentence border that coincides with the window border (and not the text border)
+                    # is an artefact of the window: ignore it, the word limit applies on that side
+                    if not (s == 0 and lo > 0):
+                        a = lo + s
+                    if not (e == len(snip) and hi < len(text)):
+                        b = lo + e
                     break
-            a, b = (
-                span or (max(0, hs - fb), min(len(text), he + fb))
-            )  # if no acceptable sentence (not found, cut off, or too long): fixed window of +/- fb characters
+            # whole tokens inside [a, b], at most max_words on each side of the hit
+            j0 = max(bisect_left(starts, a), i - max_words)  # first context token before the hit
+            j1 = min(bisect_right(ends, b) - 1, i + max_words)  # last context token after the hit
             hits.append(
                 {
                     "id": doc_id,
                     "target_form": word,
                     "position": i,
-                    "context_before": collapse_whitespace(text[a:hs]),
-                    "context_after": collapse_whitespace(text[he:b]),
-                    "sentence_based": span is not None,
+                    "context_before": collapse_whitespace(text[starts[j0]:hs]) if j0 < i else "",
+                    "context_after": collapse_whitespace(text[he:ends[j1]]) if j1 > i else "",
+                    "sentence_based": sentence_based,
                 }
             )
         return hits

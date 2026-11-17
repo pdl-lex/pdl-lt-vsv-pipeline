@@ -103,6 +103,9 @@ with app.setup:
             # invisible characters (soft hyphens at line ends are handled before, see SOFT_HYPHEN)
             "\u00ad": None, "\u200b": None, "\u200c": None, "\u200d": None,
             "\u2060": None, "\ufeff": None,
+            # hyphen (U+2010) and non-breaking hyphen (U+2011) -> hyphen-minus; otherwise "3<U+2011>Prozent"
+            # is cut into "3" and "<U+2011>Prozent", and "G<U+2011>7" never matches "G-7"
+            "\u2010": "-", "\u2011": "-",
             # special spaces (no-break, en/em/thin/hair, narrow no-break, ...) -> normal space
             **{chr(c): " " for c in [0x00A0, *range(0x2000, 0x200B), 0x202F, 0x205F, 0x3000]},
             # page break (ExtracEval page separator) and vertical tab -> line break
@@ -118,8 +121,9 @@ with app.setup:
     # line break goes: "CDU-\nPolitiker" -> "CDU-Politiker". Coordinations keep the space:
     # "Ein-\nund Ausfuhr" -> "Ein- und Ausfuhr" (see COORDINATION).
     COORDINATION = r"(?!(?:und|oder|bis|sowie|wie|als|noch|bzw|respektive|beziehungsweise)\b)"
-    LINE_HYPHEN_SPLIT = re.compile(rf"(\w)[-\u2010][ \t]*\n[ \t]*{COORDINATION}([a-zäöüß])")
-    LINE_HYPHEN_WORD = re.compile(rf"(\w[-\u2010])[ \t]*\n[ \t]*{COORDINATION}(?=\w)")
+    # (U+2010 is already mapped to "-" by CHAR_MAP, which runs before these)
+    LINE_HYPHEN_SPLIT = re.compile(rf"(\w)-[ \t]*\n[ \t]*{COORDINATION}([a-zäöüß])")
+    LINE_HYPHEN_WORD = re.compile(rf"(\w-)[ \t]*\n[ \t]*{COORDINATION}(?=\w)")
     WHITESPACE = re.compile(r"\s+")
     SPACES_IN_LINE = re.compile(r"[^\S\n]+")
     BLANK_LINES = re.compile(r"\n\s*\n+")
@@ -505,6 +509,9 @@ def _():
     * **Unicode-Normalisierung (NFC):** PDF-Werkzeuge liefern Umlaute teils zerlegt (`u` + Trema-Zeichen). Das sieht gleich aus, ist aber eine andere Zeichenfolge als `ü`.
     * **Ligaturen** (`ﬁ`, `ﬂ`, `ﬀ` …) werden in Einzelbuchstaben aufgelöst.
     * **Weiche Trennstriche** (Soft Hyphens) und unsichtbare Zeichen werden entfernt, Sonderleerzeichen werden zu normalen Leerzeichen.
+    * **Geschützte und typografische Bindestriche** (U+2011, U+2010) werden zum normalen Bindestrich. Sonst zerfällt `3‑Prozent` in `3` und `‑Prozent`, und `G‑7` stimmt nicht mit `G-7` überein.
+
+    Diese Zeichen-Schritte (bis hierher) bilden die Funktion `normalize_chars`. Das Preprocessing (`pipeline_pre_ppmi.py`) wendet sie auf jedes Korpus an, auch auf solche, die nicht über diesen Import kommen (die Bundestagsreden).
     * **Silbentrennung am Zeilenende** (optional, Standard: an): `Bundes-⏎wehr` → `Bundeswehr`. Der Bindestrich fällt nur weg, wenn nach dem Umbruch ein Kleinbuchstabe folgt; sonst gehört er zum Wort: `CDU-⏎Politiker` → `CDU-Politiker`. Aufzählungen wie `Ein-⏎und Ausfuhr` bleiben unverändert. Ohne diesen Schritt würde jedes getrennte Zielwort übersehen.
     * **Leerraum zusammenfassen** (optional, Standard: an): Zeilenumbrüche, Tabulatoren und Mehrfach-Leerzeichen werden zu einem Leerzeichen; jede Ausgabe steht dann in einer einzigen CSV-Zeile. Das Preprocessing nutzt Zeilenumbrüche nicht. Ausgeschaltet bleiben Zeilen und Absätze erhalten (CSV-konform in Anführungszeichen).
 
@@ -516,12 +523,22 @@ def _():
 
 
 @app.function
-def clean_text(text, dehyphenate=True, collapse_whitespace=True):
-    """Normalize a decoded text; see the markdown cell above for the single steps."""
+def normalize_chars(text):
+    """
+    Character level only: line endings, NFC, soft hyphens, ligatures, invisible characters,
+    special spaces and hyphens. Keeps line breaks and hyphenation; pipeline_pre_ppmi.py imports
+    it and applies it to every corpus.
+    """
     text = text.replace("\r\n", "\n").replace("\r", "\n")
     text = unicodedata.normalize("NFC", text)
     text = SOFT_HYPHEN.sub("", text)
-    text = text.translate(CHAR_MAP)
+    return text.translate(CHAR_MAP)
+
+
+@app.function
+def clean_text(text, dehyphenate=True, collapse_whitespace=True):
+    """Normalize a decoded text; see the markdown cell above for the single steps."""
+    text = normalize_chars(text)
     if dehyphenate:
         text = LINE_HYPHEN_SPLIT.sub(r"\1\2", text)
         text = LINE_HYPHEN_WORD.sub(r"\1", text)

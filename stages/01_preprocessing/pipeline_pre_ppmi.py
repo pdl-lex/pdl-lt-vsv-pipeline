@@ -11,7 +11,10 @@ def _():
     import re
     from pathlib import Path
 
-    return Path, mo, pl, re
+    # character normalization shared with the data import (soft hyphens, U+2011, ligatures, ...)
+    from pipeline_pre_dataimport import normalize_chars
+
+    return Path, mo, normalize_chars, pl, re
 
 
 @app.cell(hide_code=True)
@@ -587,9 +590,12 @@ def _(
 
 
 @app.function
-def read_corpus_rows(files, id_col, date_col, text_col, on_progress=None):
+def read_corpus_rows(files, id_col, date_col, text_col, on_progress=None, normalize=None):
     """
     Yield (id, date, text) for every row of the corpus CSV files, one row at a time.
+
+    normalize(text) is applied to every non-empty text before it is yielded (character
+    normalization, see normalize_chars in pipeline_pre_dataimport.py).
 
     Reads with the csv module instead of polars, so memory stays constant whatever the file
     size (polars holds a whole CSV file in memory while reading it, even in batches).
@@ -618,6 +624,8 @@ def read_corpus_rows(files, id_col, date_col, text_col, on_progress=None):
                     doc_id = None if row[i_id] in missing else row[i_id]
                 date = None if row[i_date] in missing else row[i_date]
                 text = None if row[i_text] in missing else row[i_text]
+                if text and normalize:
+                    text = normalize(text)
                 yield doc_id, date, text
                 if on_progress:
                     # position of the underlying byte stream; advances in blocks of the read buffer
@@ -665,7 +673,17 @@ def write_kwic_hits(rows, extract, out_path, batch_size=100_000):
 
 
 @app.cell
-def _(Path, corpus_files, kwic_extract, kwic_variant, mo, pl, run, source_columns):
+def _(
+    Path,
+    corpus_files,
+    kwic_extract,
+    kwic_variant,
+    mo,
+    normalize_chars,
+    pl,
+    run,
+    source_columns,
+):
     # this cell only runs when the "Extraktion starten" button above is hit
     mo.stop(
         not run.value, mo.md("Einstellungen wählen und **Extraktion starten** klicken.")
@@ -691,6 +709,9 @@ def _(Path, corpus_files, kwic_extract, kwic_variant, mo, pl, run, source_column
             source_columns["date"],
             source_columns["text"],
             on_progress=_progress,
+            # soft hyphens, non-breaking hyphens, invisible characters etc.; the Bundestag CSV
+            # does not pass through pipeline_pre_dataimport.py, so the same step is applied here
+            normalize=normalize_chars,
         )
         # same file name as read below (kwic_variant includes the window size)
         _n_docs, _n_hits = write_kwic_hits(_rows, kwic_extract, _out)

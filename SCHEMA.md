@@ -57,7 +57,7 @@ ist nicht die Architektur, sondern die Zell-Sparsity (siehe unten).
 
 ```json
 {
-  "entity_id": "bundeswehr",
+  "entity_id": "Bundeswehr",
   "time_slice_id": "2022Q3",
   "facets": {"publication": "SZ"},   // {} bei aggregates
   "vector": [ ... vector_dim floats ... ],
@@ -165,7 +165,7 @@ gezeichnet, die zugleich Anker sind — der Rest bleibt auf die Liste beschränk
 ## `neighbors`
 
 ```json
-{"bundeswehr": {"2022Q3": [{"label": "Wehrhaftigkeit", "score": 0.89, "group": "WEHR"}, ...]}}
+{"Bundeswehr": {"2022Q3": [{"label": "Wehrhaftigkeit", "score": 0.89, "group": "WEHR"}, ...]}}
 ```
 
 Vorberechnet auf Aggregat-Ebene gegen die gefilterte Kandidatenliste (alle

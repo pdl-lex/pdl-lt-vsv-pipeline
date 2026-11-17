@@ -239,46 +239,29 @@ def _(context_vectors, np, target_slice_vectors):
 def _(mo):
     mo.md(r"""
     ## Erzeugung von IDs
-    In den folgenden Zellen werden IDs erzeugt, die zur Verlinkung der verschiedenen Teil des Bundles dienen. Diese werden als *slugs* erstellt; eventuell wäre dieser Schritt auch verzichtbar, dann würden die Wörter selbst als IDs dienen (evtl. Risiko durch Sonderzeichen).
+    In den folgenden Zellen werden IDs erzeugt, die zur Verlinkung der verschiedenen Teile des Bundles dienen. Als ID eines Zielworts dient sein Lemma unverändert (z. B. `Abrüstung`, `NATO-Staat`). JSON verträgt UTF-8, und das Schema schreibt kein ID-Format vor. Eine Umwandlung in *slugs* (Kleinschreibung, Umlaute transliteriert) würde erst das Risiko schaffen, dass zwei Lemmata dieselbe ID erhalten (`Sterben`/`sterben`, `Maß`/`Mass`). Da die Lemmata eindeutig sind, sind es auch die IDs.
     """)
     return
 
 
 @app.cell
 def _(pl, target_slices):
-    # The following function creates simple IDs for the target words. In principle, different words ("Maß", "Mass") could be mapped to the same ID by mistake, but since the target word list is small and known, the risk is low. The assert condition performs a simple check in this respect.
-
-    def to_target_id(column):
-        """Lemma -> entity_id: lowercase, umlauts transliterated."""
-        return (
-            column.str.to_lowercase()
-            .str.replace_all("ä", "ae")
-            .str.replace_all("ö", "oe")
-            .str.replace_all("ü", "ue")
-            .str.replace_all("ß", "ss")
-            .str.replace_all("-", "_")
-        )
-
-    # target words
+    # target words; the lemma itself is the ID (entity_id), see the note above.
+    # unique() makes each lemma one entity, so the IDs cannot collide.
     targets = (
         target_slices.select("target_lemma")
         .unique()
         .sort("target_lemma")
-        .with_columns(
+        .select(
             [
-                to_target_id(pl.col("target_lemma")).alias("id"),
+                pl.col("target_lemma").alias("id"),
                 pl.col("target_lemma").alias("label"),
             ]
         )
-        .select(["id", "label"])
-    )
-
-    assert targets["id"].n_unique() == targets.height, (
-        "to_target_id() collision: at least two lemmas were mapped to the same ID."
     )
 
     targets
-    return targets, to_target_id
+    return (targets,)
 
 
 @app.cell
@@ -384,7 +367,6 @@ def _(
     target_slice_coords,
     target_slice_vectors_unit,
     target_slices,
-    to_target_id,
 ):
     # combine vectors and 3D coordinates with existing data
     # order of target_slice_vectors_unit and target_slice_coords = order of target_slices, which has
@@ -399,7 +381,7 @@ def _(
         # rename to the schema names
         .with_columns(
             [
-                to_target_id(pl.col("target_lemma")).alias("entity_id"),
+                pl.col("target_lemma").alias("entity_id"),
                 pl.col("slice").alias("time_slice_id"),
             ]
         )
@@ -764,7 +746,6 @@ def _(
     target_slice_coords,
     target_slice_vectors_unit,
     target_slices,
-    to_target_id,
 ):
     # grid in the file name: several versions can coexist
     bundle_base = f"bundestag_zeitenwende_{slice_grid}"
@@ -776,7 +757,7 @@ def _(
     _queries = target_slices.select(
         pl.lit("query").alias("role"),
         pl.col("slice"),
-        to_target_id(pl.col("target_lemma")).alias("entity_id"),
+        pl.col("target_lemma").alias("entity_id"),
         pl.col("target_lemma").alias("lemma"),
     ).with_columns(pl.Series("coords_3d", target_slice_coords.tolist()))
 
@@ -896,7 +877,6 @@ def _(
     space_index,
     space_vectors,
     target_slices,
-    to_target_id,
 ):
     n_neighbors = 150
 
@@ -937,9 +917,7 @@ def _(
     # np.repeat repeats each row entry n_neighbors times (matching .ravel()),
     # np.tile counts 1..n_neighbors within each row.
     # The rank is needed because the following join may change the row order.
-    neighbor_target_ids = target_slices.with_columns(
-        to_target_id(pl.col("target_lemma")).alias("entity_id")
-    )["entity_id"].to_numpy()
+    neighbor_target_ids = target_slices["target_lemma"].to_numpy()
 
     neighbor_ranks = pl.DataFrame(
         {

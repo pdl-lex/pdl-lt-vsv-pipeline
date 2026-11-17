@@ -45,7 +45,7 @@ def _(mo):
 
     Folgende Varianten stehen zur Verfügung:
 
-    * KWIC mit einem Fenster von 40 Zeichen vor und nach der Fundstelle: "windw40"
+    * KWIC mit einem Fenster von N Wörtern vor und nach der Fundstelle (Standard 20): "window20"
     * KWIC mit Fenster identisch zum Satz, geparst mit NLTK  Punkt: "punkt"
     * KWIC mit Fenster identisch zum Satz, geparst mit SoMaJo: "somajo"
 
@@ -214,7 +214,7 @@ def _(mo):
     $$
     * PMI:
     $$
-    \text{{PPMI}} = \log_2 \frac{{\text{{beobachtet}}}}{{\text{{erwartet}}}}
+    \text{{PMI}} = \log_2 \frac{{\text{{beobachtet}}}}{{\text{{erwartet}}}}
     $$
 
     * PPMI
@@ -281,13 +281,7 @@ def _(mo):
     ihn als inhaltlichen Befund interpretiert.
 
     ***Einmalige Kontextwörter (1 Vorkommen)***
-    ppmi ist ein Verhältnis: log2(beobachtet / erwartet). Bei einem exklusiven Kontextwort ist randsumme_kontext == beobachtet, und dann kürzt sich beobachtet aus dem Bruch heraus. Übrig bleibt log2(gesamt / randsumme_ziel) — eine Konstante, die nur noch vom Zielwort abhängt. Deshalb sind z.B. 12 Treffer und 7 Treffer nicht mehr unterscheidbar. Lösen lässt sich dieses Problem, in dem man die Trefferzahl wieder mit einberechnet. Hierzu werden zwei Metriken angeboten:
-
-    **Local-MI**
-    PPMI misst die Bindungsstärke *einer einzelnen* cooccurence – wie überraschend es ist, dieses Wortpaar einmal zu sehen. Es sagt aber nichts darüber, wie oft man diese Überraschung tatsächlich beobachtet hat. Local-MI multipliziert deshalb Stärke mit Menge: `beobachtet × ppmi`, also der Gesamtbeitrag dieses Wortpaars zur Bindung der ganzen Tabelle (formal der Anteil dieser Zelle an der Transinformation). Damit verschwindet der Deckeneffekt, denn bei einem exklusiven Kontextwort ist PPMI eine Konstante und Local-MI wird streng linear in der Trefferzahl – zwölf Treffer stehen dann wieder sichtbar über sieben. Der Preis ist, dass diese lineare Gewichtung häufige Wörter stark bevorzugt: ohne einen zusätzlichen POS- oder Stoppwortfilter schiebt sich in diesem Korpus etwa `wir` fast an die Spitze. Local-MI ist deshalb als Diagnosespalte nützlich, aber aus demselben Grund kein geeigneter Input für die spätere SVD.
-
-    **t-Score**
-    Statt zu fragen „*wievielmal* häufiger als erwartet?" (ein Verhältnis) fragt der t-Score „*wie viel* häufiger als erwartet, gemessen in Standardfehlern?" (eine Differenz). Zählungen streuen näherungsweise poissonverteilt, weshalb die Wurzel aus der Trefferzahl als Standardfehler   dient. Der Wert beantwortet damit eine andere Frage als PPMI: nicht *wie eng* die Bindung ist, sondern *wie gut belegt* sie ist. Weil es sich um eine Differenz und nicht um ein Verhältnis handelt, existiert hier keine Decke –  für ein exklusives Kontextwort vereinfacht sich die Formel zu `√beobachtet × (1 − P(Zielwort))`, wächst also mit der Wurzel der Trefferzahl weiter. In der Praxis führt das dazu, dass gut belegte Paare die Rangliste anführen, während seltene exklusive Treffer dorthin rutschen, wo ihre schmale Beobachtungsgrundlage sie hingehören lässt.
+    ppmi ist ein Verhältnis: log2(beobachtet / erwartet). Bei einem exklusiven Kontextwort ist randsumme_kontext == beobachtet, und dann kürzt sich beobachtet aus dem Bruch heraus. Übrig bleibt log2(gesamt / randsumme_ziel) — eine Konstante, die nur noch vom Zielwort abhängt. Deshalb sind z.B. 12 Treffer und 7 Treffer nicht mehr unterscheidbar.
     """)
     return
 

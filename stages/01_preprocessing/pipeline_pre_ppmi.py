@@ -573,7 +573,7 @@ def _(kwic_variant):
 @app.cell
 def _(kwic_variant, pl):
     # Read pre-generated list
-    # default modes are "punkt", "somajo" and "window40"
+    # default modes are "punkt", "somajo" and "window20"
     # Use control above to switch
 
     kwic_hits = pl.read_csv(f"output/{kwic_variant}/kwic_hits_{kwic_variant}.csv", null_values="NA")

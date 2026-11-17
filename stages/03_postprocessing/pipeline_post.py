@@ -1153,8 +1153,9 @@ def _(baseline_cosines, n_neighbors, neighbor_ranks, neighbor_scores, np):
 
 @app.cell
 def _(neighbors):
-    # sample: example target word in its latest slice
-    neighbors["bundeswehr"][max(neighbors["bundeswehr"])][:10]
+    # sample: first target word in its latest slice (works for any target list)
+    _t = next(iter(neighbors))
+    neighbors[_t][max(neighbors[_t])][:10]
     return
 
 

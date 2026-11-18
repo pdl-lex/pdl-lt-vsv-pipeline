@@ -167,7 +167,6 @@ def _(json, mo, np, pl, sp):
         row_hits,
         row_slice,
         row_word,
-        rows,
         slice_labels,
     )
 
@@ -211,7 +210,7 @@ def _(mo):
 
 
 @app.cell
-def _(mo, np, pl, row_slice, row_word, slice_labels, sp, svds):
+def _(mo, np, row_slice, row_word, slice_labels, sp, svds):
     def show_table(df):
         """Table with all rows on one page."""
         return mo.ui.table(df, pagination=False, selection=None, show_column_summaries=False, show_data_types=False)
@@ -434,7 +433,7 @@ def _(mo):
 
 
 @app.cell
-def _(fmt_int, fmt_pct, np, pl, row_hits, show_table):
+def _(fmt_int, fmt_pct, pl, row_hits, show_table):
     # candidate thresholds (hits per row); the largest value also defines the probe rows
     H_GRID = [1, 2, 3, 5, 7, 10, 15, 20, 30, 50]
     H_MAX = max(H_GRID)
@@ -1105,7 +1104,7 @@ def _(
         show_table(pl.DataFrame(_details)),
         mo.callout(mo.md("\n\n".join(_text)), kind=_kind),
     ])
-    return (classes,)
+    return
 
 
 @app.cell(hide_code=True)
@@ -1292,7 +1291,14 @@ def _(
         })),
         mo.md(f"Rang der PPMI-Matrix der vollständigen Daten: {fmt_int(kp_rank_full)} (Zeilen: {fmt_int(n_rows)})."),
     ])
-    return KP_KS, KP_PS, KP_REFERENCE, kp_separation, kp_spectrum, kp_volume_effect
+    return (
+        KP_KS,
+        KP_PS,
+        KP_REFERENCE,
+        kp_separation,
+        kp_spectrum,
+        kp_volume_effect,
+    )
 
 
 @app.cell
@@ -1663,7 +1669,7 @@ def _(
         ]
 
     mo.vstack(_outputs + [mo.md("\n\n".join(_text)), mo.callout(mo.md(_rec), kind=_kind)])
-    return (kp_best,)
+    return
 
 
 @app.cell(hide_code=True)

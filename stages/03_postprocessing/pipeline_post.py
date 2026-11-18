@@ -390,12 +390,7 @@ def _(np, target_slice_vectors_unit):
 
 
 @app.cell
-def _(
-    pl,
-    target_slice_coords,
-    target_slice_vectors_unit,
-    target_slices,
-):
+def _(pl, target_slice_coords, target_slice_vectors_unit, target_slices):
     # combine vectors and 3D coordinates with existing data
     # order of target_slice_vectors_unit and target_slice_coords = order of target_slices, which has
     # not been re-sorted since loading
@@ -971,14 +966,7 @@ def _(mo):
 
 
 @app.cell
-def _(
-    neighbor_candidates,
-    np,
-    pl,
-    space_index,
-    space_vectors,
-    target_slices,
-):
+def _(neighbor_candidates, np, pl, space_index, space_vectors, target_slices):
     n_neighbors = 150
 
     # Search space rows: the queries come first (same order as target_slices),

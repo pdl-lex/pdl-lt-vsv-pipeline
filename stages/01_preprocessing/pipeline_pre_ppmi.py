@@ -1234,7 +1234,7 @@ def lemmatize_kwic_hits(
     return n_computed
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
     Die Lemmatisierung des Kontexts läuft in Stapeln zu 20.000 Treffern, jeder Stapel wird sofort als Teildatei gespeichert (`output/<variante>/kwic_hits_lemmatized_stanza_<projekt>_<variante>_parts/`). Wird der Lauf abgebrochen, setzt der nächste Lauf beim ersten fehlenden Stapel fort. Das gilt nur, solange die KWIC-Treffer, die Zielwortliste und die Mapping-Einstellungen dieselben sind, sonst wird neu begonnen. Am Ende werden die Teile zu einer Datei zusammengeführt und gelöscht.

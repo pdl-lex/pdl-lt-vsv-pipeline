@@ -12,3 +12,4 @@ stages/01_preprocessing/output/somajo
 stages/01_preprocessing/output/window40
 *diagnose_alt.py
 alt/
+**/output/**/*_parts/

@@ -83,7 +83,7 @@ def _():
     in_dir = Path(f"input/{kwic_variant}")
     out_dir = Path(f"output/{kwic_variant}")
     run_name = f"{project}_{kwic_variant}_{slice_grid}"
-    return Path, in_dir, kwic_variant, out_dir, project, run_name, slice_grid
+    return in_dir, kwic_variant, out_dir, project, run_name, slice_grid
 
 
 @app.cell
@@ -414,7 +414,7 @@ def _(mo):
 
 
 @app.cell
-def _(kwic_hits_sliced, np, pl, target_slices):
+def _(kwic_hits_sliced, np, target_slices):
     # None = all rows take part in the SVD (default); a number = only rows with at least this many hits
     MIN_HITS_FIT = None
 

@@ -1773,7 +1773,19 @@ def _(mo):
 
 
 @app.cell
-def _(fmt_int, fmt_num, fmt_pct, h_star, mo, np, pl, row_hits, row_slice, row_word, show_table):
+def _(
+    fmt_int,
+    fmt_num,
+    fmt_pct,
+    h_star,
+    mo,
+    np,
+    pl,
+    row_hits,
+    row_slice,
+    row_word,
+    show_table,
+):
     DRIFT_FLOOR_MIN = 10
     DRIFT_FLOOR = max(DRIFT_FLOOR_MIN, h_star) if h_star is not None else DRIFT_FLOOR_MIN
 

@@ -36,6 +36,7 @@ def _(mo):
     1. Reliabilität einer Zeile in Abhängigkeit von ihrer Trefferzahl (Mindesttrefferzahl)
     2. Einfluss schwach belegter Zeilen auf den Raum (SVD ohne diese Zeilen, *folding-in*)
     3. Rang k der SVD und Exponent p der Eigenwertgewichtung (Referenz: k und p des letzten Laufs von emb)
+    4. Abhängigkeit der Drift zwischen benachbarten Zeitscheiben von der Trefferzahl (Teilstichproben, Permutationserwartung)
 
     Alle Abschnitte verwenden dasselbe Messverfahren, das vorab einmal beschrieben wird. Jeder Abschnitt ist gleich aufgebaut: Verfahren, Fragestellung, Methode, erwartete Ergebnisse und ihre Deutung, Entscheidungsregel, Vorprüfung, Berechnung, automatische Auswertung mit Empfehlung, Einschränkungen, Literatur. Die Auswertung leitet ihre Aussagen ausschließlich aus den Werten ab, die im selben Lauf berechnet werden. Ergebnisse früherer Messungen werden nicht übernommen.
 
@@ -871,14 +872,14 @@ def _(
     # thresholds to test; h* and the cross-check value from section 1 are always included
     N_CANDIDATES = sorted({3, 5, 7, 10} | {_h for _h in (h_star, h_natural) if _h is not None and _h > 1})
 
-    # full data, as in emb
+    # full data, as in emb; the space is reused in section 4
     _all = np.arange(len(hit_row))
-    _C = counts_from_hits(hit_counts, _all, hit_row, n_rows)
-    _M = ppmi(_C, row_slice, *slice_marginals(_C))
-    _V, _s = fit_space(_M, SVD_K, SEED)
-    _U = project(_M, _V, _s, 0.0)                       # U_k = M V_k S_k^-1
+    full_counts = counts_from_hits(hit_counts, _all, hit_row, n_rows)
+    full_ppmi = ppmi(full_counts, row_slice, *slice_marginals(full_counts))
+    full_V, full_s = fit_space(full_ppmi, SVD_K, SEED)
+    _U = project(full_ppmi, full_V, full_s, 0.0)        # U_k = M V_k S_k^-1
     _leverage = (_U ** 2).sum(axis=1)                    # sums to k
-    _sq = np.asarray(_M.multiply(_M).sum(axis=1)).ravel()
+    _sq = np.asarray(full_ppmi.multiply(full_ppmi).sum(axis=1)).ravel()
 
     precheck = {
         _n: {
@@ -899,7 +900,7 @@ def _(
             for _n in N_CANDIDATES
         ],
     }))
-    return N_CANDIDATES, precheck
+    return N_CANDIDATES, full_V, full_counts, full_ppmi, full_s, precheck
 
 
 @app.cell
@@ -1694,6 +1695,665 @@ def _(mo):
     - Golub, G. H. & Van Loan, C. F. (2013): *Matrix Computations*. 4. Aufl. Johns Hopkins University Press.
     - Levy, O., Goldberg, Y. & Dagan, I. (2015): Improving distributional similarity with lessons learned from word embeddings. *Transactions of the Association for Computational Linguistics* 3, 211–225.
     - Österlund, A., Ödling, D. & Sahlgren, M. (2015): Factorization of latent variables in distributional semantic models. In: *Proceedings of EMNLP 2015*, 227–231.
+
+    Weitere Angaben zum Messverfahren s. Abschnitt 1. Die bibliografischen Angaben sind vor einer Veröffentlichung an den Originalen zu prüfen.
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ## 4. Abhängigkeit der Drift von der Trefferzahl
+
+    ### Verfahren
+
+    Die Verschiebung eines Zielworts zwischen zwei benachbarten Zeitscheiben wird als Kosinusdistanz zwischen seinen beiden Zeilenvektoren gemessen, also als 1 minus Kosinusähnlichkeit (zu diesem Maß Hamilton, Leskovec & Jurafsky 2016; Kutuzov et al. 2018). Im Folgenden heißt dieser Wert **Drift**. Die Trefferzahlen der beiden Zeilen eines Paars sind oft sehr verschieden. Das ist ein Problem, wenn die Drift selbst von der Trefferzahl abhängt: Ein Profil aus wenigen Belegen ist eine ungenaue Schätzung, und die Zufallsschwankung der Stichprobe erscheint als Abstand. Ein Teil der gemessenen Drift ist dann ein Stichprobeneffekt und kein Wandel. Dubossarsky, Weinshall & Grossman (2017) zeigen, dass mehrere in der Literatur berichtete Zusammenhänge zwischen Häufigkeit und Bedeutungswandel unter einer solchen Kontrolle weitgehend verschwinden.
+
+    Dieser Abschnitt prüft, wie stark die Drift in diesen Daten von der Trefferzahl abhängt, und vergleicht Verfahren, die diese Abhängigkeit verringern sollen. Er ergänzt Abschnitt 1: Dort wird gefragt, ob eine einzelne Zeile reproduzierbar ist, hier, ob der Abstand zwischen zwei Zeilen von ihrer Trefferzahl abhängt.
+
+    ### Fragestellung
+
+    Hängt die Drift zwischen benachbarten Zeitscheiben desselben Zielworts von der Trefferzahl der beiden Zeilen ab? Welches Verfahren verringert diese Abhängigkeit am stärksten: Teilstichproben auf eine gemeinsame Trefferzahl oder der Abzug der Drift, die ohne Unterschied zwischen den Zeitscheiben zu erwarten ist?
+
+    ### Methode
+
+    **Paare.** Ausgewertet werden alle Paare benachbarter Zeitscheiben desselben Zielworts, deren beide Zeilen mindestens `DRIFT_FLOOR` Belege haben. Voreingestellt ist h\* aus Abschnitt 1, mindestens aber `DRIFT_FLOOR_MIN` = 10 Belege. Die Untergrenze verhindert, dass die Teilstichproben je Wort (s. u.) auf einzelne Belege fallen; sie ist eine Konvention. Die Vektoren stammen wie in emb aus einer SVD der vollständigen Daten (k und p wie in emb). Neu berechnete Zeilen (Teilstichproben, Permutationen) werden per *folding-in* in diesen Raum projiziert (s. Messverfahren).
+
+    **Kennwert: Volumenabhängigkeit.** Für jedes Paar wird die kleinere der beiden Trefferzahlen bestimmt; sie begrenzt die Genauigkeit des Paars. Gemessen wird der Korrelationskoeffizient nach Pearson, r, zwischen der Drift und dem Logarithmus dieser Trefferzahl, und zwar innerhalb der Zielwörter: Von beiden Größen wird je Zielwort der Mittelwert über seine Paare abgezogen, und die Korrelation wird aus diesen Abweichungen über alle Paare berechnet (Korrelation innerhalb von Gruppen, Bland & Altman 1995). r liegt zwischen −1 und 1. Bei 0 hängt die Drift nicht linear von der logarithmierten Trefferzahl ab. Ein negativer Wert bedeutet, dass ein Wort zwischen schwach belegten Zeitscheiben eine größere Drift zeigt als zwischen gut belegten. Die Berechnung innerhalb der Zielwörter schließt aus, dass Unterschiede zwischen häufigen und seltenen Wörtern den Wert bestimmen. Gefragt ist, ob die Trajektorie *eines* Worts von der Belegung seiner Zeitscheiben abhängt. Einbezogen werden Zielwörter mit mindestens zwei Paaren.
+
+    **Unsicherheit.** Die Unsicherheit von r wird mit einem Bootstrap über die Zielwörter geschätzt (Efron & Tibshirani 1993; Ziehen ganzer Gruppen: Davison & Hinkley 1997). Die Zielwörter werden `DRIFT_N_BOOT`-mal mit Zurücklegen neu gezogen, jedes mit allen seinen Paaren, und r wird jedes Mal neu berechnet. Das 95-%-Intervall reicht vom 2,5-%- bis zum 97,5-%-Quantil dieser Werte (Perzentilintervall). Gezogen werden Zielwörter und nicht Paare, weil die Paare desselben Worts nicht unabhängig voneinander sind.
+
+    **Verglichene Verfahren.** Alle Varianten werden an denselben Paaren berechnet.
+
+    | Variante | Berechnung | verwendete Belege |
+    |---|---|---|
+    | **Rohdrift** (Referenz, heutiger Stand von emb) | Vektoren der vollständigen Daten | alle |
+    | **Teilstichprobe je Paar** | Die größere Zeile eines Paars wird auf die Trefferzahl der kleineren gezogen; Drift gemittelt über `DRIFT_N_DRAWS` Ziehungen | je Paar zweimal die kleinere Trefferzahl |
+    | **Teilstichprobe je Wort, Distanzen gemittelt** | Jede ausgewertete Zeile eines Worts wird auf die kleinste Trefferzahl unter diesen Zeilen gezogen; Drift je Ziehung, dann gemittelt | je Zeile die kleinste Trefferzahl ihres Worts |
+    | **Teilstichprobe je Wort, Vektoren gemittelt** | dieselben Ziehungen; die Einheitsvektoren einer Zeile werden über die Ziehungen gemittelt, die Drift wird aus den gemittelten Vektoren berechnet | wie zuvor, je Ziehung |
+    | **Drift abzüglich Permutationserwartung** | beobachtete Drift minus mittlere Drift unter Permutation (s. u.) | alle |
+
+    Die Teilstichproben werden nach Reden gezogen wie in Abschnitt 1: Reden in zufälliger Reihenfolge, aus der letzten Rede so viele Belege, wie noch fehlen. Ihre PPMI-Werte werden wie in Abschnitt 1 mit den Randsummen berechnet, in denen die vollständige Zeile durch ihre Teilstichprobe ersetzt ist. Die beiden Varianten „je Wort“ unterscheiden sich darin, was sich in emb umsetzen ließe: Gemittelte Vektoren ergeben einen Vektor je Zeile und passen in das bestehende Bundle, gemittelte Distanzen gibt es nur je Paar.
+
+    Die Teilstichprobe je Paar gleicht die Trefferzahl nur innerhalb eines Paars an, nicht zwischen den Paaren eines Worts. Sie wird mitgeführt, weil sie das naheliegende Verfahren ist; das Ergebnis zeigt, ob die Angleichung innerhalb des Paars genügt.
+
+    **Permutationserwartung.** Für jedes Paar werden die Belege beider Zeitscheiben zusammengelegt und `DRIFT_N_PERM`-mal zufällig auf zwei Zeilen mit den tatsächlichen Trefferzahlen verteilt, nach Reden wie oben. Jede Verteilung ergibt eine Drift, wie sie bei gleicher Trefferzahl ohne Unterschied zwischen den beiden Zeitscheiben auftritt (Permutationstest, Good 2005; als Kontrollbedingung für die Messung von Bedeutungswandel: Dubossarsky, Weinshall & Grossman 2017). Damit beobachtete und permutierte Drift auf dieselbe Weise berechnet werden, erhalten in dieser Rechnung beide Zeilen eines Paars dieselben Randsummen, nämlich die beider Zeitscheiben zusammen. Die so berechnete beobachtete Drift („Drift mit gemeinsamen Randsummen“) weicht deshalb von der Rohdrift ab und wird zur Information mitberichtet. Je Paar ergibt sich außerdem ein p-Wert: der Anteil der Permutationen mit mindestens so großer Drift wie beobachtet, berechnet als (1 + Anzahl) / (1 + `DRIFT_N_PERM`) (Phipson & Smyth 2010).
+
+    **Sättigungskurve (zur Information).** Für die Paare, deren beide Zeilen mindestens `H_MAX` Belege haben (Prüfpaare), werden aus jeder Zeile genau h Belege gezogen, für jedes h aus `H_GRID` (geschachtelt wie in Abschnitt 1), und die Drift wird mit gemeinsamen Randsummen berechnet. Ebenso werden aus den zusammengelegten Belegen beider Zeilen zwei getrennte Stichproben von je h Belegen gezogen; ihr Abstand ist die Drift ohne Unterschied zwischen den Zeitscheiben bei h Belegen. Das Vorgehen entspricht der Rarefaktion, bei der Kennwerte an Stichproben gleichen Umfangs verglichen werden (Sanders 1968; Hurlbert 1971). Die Kurve zeigt, bis zu welcher Trefferzahl die Drift überwiegend vom Stichprobenumfang bestimmt wird.
+
+    ### Erwartete Ergebnisse und ihre Deutung
+
+    - Ist r der Rohdrift belastbar negativ, zeigen Wörter zwischen schwach belegten Zeitscheiben eine größere Drift. Das ist der erwartete Stichprobeneffekt. Wie groß er ohne jeden Unterschied zwischen den Zeitscheiben wäre, zeigt r der Permutationserwartung.
+    - Ist r der Rohdrift nicht belastbar von 0 verschieden, ist in diesen Daten kein Eingriff nötig.
+    - Die Teilstichprobe je Paar sollte r wenig verändern, weil die Genauigkeit eines Paars ohnehin von seiner kleineren Zeile begrenzt wird.
+    - Die Teilstichprobe je Wort mit gemittelten Distanzen sollte r am stärksten gegen 0 bringen, weil alle Paare eines Worts mit derselben Trefferzahl gemessen werden. Ihr Preis ist der Verlust an Belegen.
+    - Mit gemittelten Vektoren kann ein Teil der Abhängigkeit zurückkehren: Bei einer gut belegten Zeile unterscheiden sich die Ziehungen, und ihr Mittel ist genauer als eine einzelne Ziehung; bei der schwächsten Zeile eines Worts sind alle Ziehungen gleich.
+    - Die Drift abzüglich Permutationserwartung bringt r gegen 0, soweit sich der Stichprobeneffekt zur Drift addiert. Sie verwirft keine Belege.
+    - In der Sättigungskurve fällt die Drift ohne Unterschied mit wachsendem h. Wird sie klein gegenüber der beobachteten Drift, bestimmt die Trefferzahl die Drift nicht mehr wesentlich.
+
+    ### Entscheidungsregel
+
+    - **Voraussetzung:** Das 95-%-Intervall von r der Rohdrift schließt 0 aus. Andernfalls wird kein Eingriff empfohlen.
+    - Für jede Variante wird in jeder Bootstrap-Wiederholung der Betrag |r| der Variante minus |r| der Rohdrift berechnet. Liegt das 95-%-Intervall dieser Differenz ganz unter 0, ist die Volumenabhängigkeit **belastbar geringer**, liegt es ganz über 0, **belastbar höher**, sonst gilt **kein belastbarer Unterschied**. Bewertet wird der Betrag, weil auch eine positive Abhängigkeit eine Abhängigkeit von der Textmenge ist (wie in Abschnitt 3).
+    - Empfohlen wird unter den belastbar geringeren Varianten die mit dem kleinsten |r|. Varianten, deren |r| sich von dem der empfohlenen nicht belastbar unterscheidet (Intervall der Differenz schließt 0 ein), werden als gleichwertig genannt. Zwischen ihnen entscheiden Belegverlust und Umsetzbarkeit, die die Auswertung je Variante angibt.
+    - Ist keine Variante belastbar geringer, bleibt es bei der Rohdrift.
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ### Vorprüfung
+
+    Wie ungleich sind die Trefferzahlen benachbarter Zeitscheiben? Die Tabelle zeigt für alle Paare benachbarter Zeitscheiben desselben Zielworts und für die ausgewerteten Paare das Verhältnis der größeren zur kleineren Trefferzahl (1 = gleich viele Belege).
+    """)
+    return
+
+
+@app.cell
+def _(fmt_int, fmt_num, fmt_pct, h_star, mo, np, pl, row_hits, row_slice, row_word, show_table):
+    DRIFT_FLOOR_MIN = 10
+    DRIFT_FLOOR = max(DRIFT_FLOOR_MIN, h_star) if h_star is not None else DRIFT_FLOOR_MIN
+
+    # pairs of adjacent slices of the same word; a = earlier slice, b = later slice
+    _word_code = np.unique(row_word, return_inverse=True)[1]
+    _order = np.lexsort((row_slice, _word_code))
+    _a, _b = _order[:-1], _order[1:]
+    _adjacent = (_word_code[_a] == _word_code[_b]) & (row_slice[_b] == row_slice[_a] + 1)
+    _a, _b = _a[_adjacent], _b[_adjacent]
+    _low = np.minimum(row_hits[_a], row_hits[_b])
+    _ratio = np.maximum(row_hits[_a], row_hits[_b]) / _low
+    _evaluated = _low >= DRIFT_FLOOR
+    mo.stop(
+        not _evaluated.any(),
+        mo.callout(
+            mo.md(f"**Abbruch:** Kein Paar benachbarter Zeitscheiben hat in beiden Zeilen mindestens {DRIFT_FLOOR} Belege."),
+            kind="danger",
+        ),
+    )
+    drift_ia, drift_ib = _a[_evaluated], _b[_evaluated]
+
+    def _describe(name, mask):
+        r = _ratio[mask]
+        return {
+            "Paare": name,
+            "Anzahl": fmt_int(mask.sum()),
+            "Zielwörter": fmt_int(len(np.unique(_word_code[_a][mask]))),
+            "Verhältnis, Median": fmt_num(float(np.median(r)), 2),
+            "Verhältnis, 90-%-Quantil": fmt_num(float(np.quantile(r, 0.9)), 2),
+            "Anteil ≥ 2": fmt_pct((r >= 2).mean()),
+            "Anteil ≥ 5": fmt_pct((r >= 5).mean()),
+            "Anteil ≥ 10": fmt_pct((r >= 10).mean()),
+        }
+
+    show_table(pl.DataFrame([
+        _describe("alle benachbarten Paare", np.ones(len(_a), dtype=bool)),
+        _describe(f"ausgewertet (beide Zeilen ≥ {DRIFT_FLOOR} Belege)", _evaluated),
+    ]))
+    return DRIFT_FLOOR, drift_ia, drift_ib
+
+
+@app.cell
+def _(
+    SVD_P,
+    counts_from_hits,
+    drift_ia,
+    drift_ib,
+    full_V,
+    full_counts,
+    full_ppmi,
+    full_s,
+    hit_counts,
+    hit_row,
+    hit_speech,
+    n_rows,
+    np,
+    ppmi,
+    project,
+    row_hits,
+    row_slice,
+    slice_marginals,
+    sp,
+    unit_rows,
+):
+    drift_Z, drift_T = slice_marginals(full_counts)
+    drift_slice_a, drift_slice_b = row_slice[drift_ia], row_slice[drift_ib]
+    drift_n_a, drift_n_b = row_hits[drift_ia], row_hits[drift_ib]
+    _nq = len(drift_ia)
+
+    # reference: vectors of the full data, as in emb
+    _X = unit_rows(project(full_ppmi, full_V, full_s, SVD_P))
+    drift_raw = 1 - np.einsum("ij,ij->i", _X[drift_ia], _X[drift_ib])
+
+    def drift_rank(group, speech, rng):
+        """Rank of each entry within its group: speeches in random order, entries within a speech in random
+        order (as in section 1). The first h entries of a group form its sample of size h."""
+        key = group.astype(np.int64) * (int(speech.max()) + 1) + speech
+        _, inv = np.unique(key, return_inverse=True)
+        k_speech = rng.random(inv.max() + 1)[inv]
+        order = np.lexsort((rng.random(len(group)), k_speech, group))
+        g = group[order]
+        rank = np.empty(len(group), dtype=np.int64)
+        rank[order] = np.arange(len(group)) - np.searchsorted(g, g, side="left")
+        return rank
+
+    def _pooled_ppmi(C, sa, sb):
+        """PPMI as in emb, but with the marginals of slices sa and sb together (per row of C)."""
+        C = C.tocsr()
+        row_total = np.asarray(C.sum(axis=1)).ravel()
+        coo = C.tocoo()
+        a, b = sa[coo.row], sb[coo.row]
+        z = drift_Z[a, coo.col] + drift_Z[b, coo.col]
+        t = drift_T[a] + drift_T[b]
+        with np.errstate(divide="ignore"):
+            pmi = np.log2(coo.data * t / (row_total[coo.row] * z))
+        M = sp.csr_matrix((np.maximum(pmi, 0), (coo.row, coo.col)), shape=C.shape)
+        M.eliminate_zeros()
+        return M
+
+    def drift_pooled(sel, target, sa, sb):
+        """Drift per pair with shared marginals. Hit sel[t] goes to pseudo-row target[t] = 2 * pair + side;
+        sa, sb: slices of the pairs."""
+        C = counts_from_hits(hit_counts, sel, target, 2 * len(sa))
+        M = _pooled_ppmi(C, np.repeat(sa, 2), np.repeat(sb, 2))
+        X = unit_rows(project(M, full_V, full_s, SVD_P))
+        return 1 - np.einsum("ij,ij->i", X[0::2], X[1::2])
+
+    def drift_vectors(sel, target, rows_of):
+        """Unit vectors as in emb for subsamples: hit sel[t] goes to output row target[t], which replaces
+        row rows_of[target[t]] of the full data (marginals adjusted as in section 1)."""
+        C = counts_from_hits(hit_counts, sel, target, len(rows_of))
+        M = ppmi(C, row_slice[rows_of], drift_Z, drift_T, replaced=full_counts[rows_of])
+        return unit_rows(project(M, full_V, full_s, SVD_P))
+
+    # pool: every hit of an evaluated pair, once for each pair its row belongs to (at most two)
+    _pa = np.full(n_rows, -1)
+    _pa[drift_ia] = np.arange(_nq)
+    _pb = np.full(n_rows, -1)
+    _pb[drift_ib] = np.arange(_nq)
+    _ha = np.flatnonzero(_pa[hit_row] >= 0)
+    _hb = np.flatnonzero(_pb[hit_row] >= 0)
+    drift_pool_hit = np.concatenate([_ha, _hb])
+    drift_pool_pair = np.concatenate([_pa[hit_row[_ha]], _pb[hit_row[_hb]]])
+    drift_pool_side = np.concatenate([np.zeros(len(_ha), dtype=np.int64), np.ones(len(_hb), dtype=np.int64)])
+    drift_pool_speech = hit_speech[drift_pool_hit]
+    return (
+        drift_n_a,
+        drift_n_b,
+        drift_pool_hit,
+        drift_pool_pair,
+        drift_pool_side,
+        drift_pool_speech,
+        drift_pooled,
+        drift_rank,
+        drift_raw,
+        drift_slice_a,
+        drift_slice_b,
+        drift_vectors,
+    )
+
+
+@app.cell
+def _(
+    SEED,
+    drift_n_a,
+    drift_pool_hit,
+    drift_pool_pair,
+    drift_pool_side,
+    drift_pool_speech,
+    drift_pooled,
+    drift_rank,
+    drift_slice_a,
+    drift_slice_b,
+    mo,
+    np,
+):
+    DRIFT_N_PERM = 99
+
+    # observed drift with shared marginals, then the same statistic with the hits of each pair redistributed
+    # by speech onto two rows of the actual sizes (the first n_a hits of the random order go to side a)
+    _rng = np.random.default_rng(SEED + 4000)
+    drift_pooled_obs = drift_pooled(
+        drift_pool_hit, 2 * drift_pool_pair + drift_pool_side, drift_slice_a, drift_slice_b
+    )
+    drift_null = np.full((DRIFT_N_PERM, len(drift_slice_a)), np.nan)
+    for _x in mo.status.progress_bar(range(DRIFT_N_PERM), title="Permutationen"):
+        _rank = drift_rank(drift_pool_pair, drift_pool_speech, _rng)
+        _side = (_rank >= drift_n_a[drift_pool_pair]).astype(np.int64)
+        drift_null[_x] = drift_pooled(drift_pool_hit, 2 * drift_pool_pair + _side, drift_slice_a, drift_slice_b)
+    return DRIFT_N_PERM, drift_null, drift_pooled_obs
+
+
+@app.cell
+def _(
+    SEED,
+    drift_ia,
+    drift_ib,
+    drift_n_a,
+    drift_n_b,
+    drift_pool_hit,
+    drift_pool_pair,
+    drift_pool_side,
+    drift_pool_speech,
+    drift_rank,
+    drift_vectors,
+    hit_row,
+    hit_speech,
+    mo,
+    n_rows,
+    np,
+    row_hits,
+    row_word,
+    unit_rows,
+):
+    DRIFT_N_DRAWS = 20
+    _rng = np.random.default_rng(SEED + 5000)
+    _nq = len(drift_ia)
+
+    # per pair: the larger row is drawn down to the hits of the smaller one (output rows 2 * pair + side)
+    _m_pair = np.minimum(drift_n_a, drift_n_b)
+    _group = 2 * drift_pool_pair + drift_pool_side
+    _rows_of = np.empty(2 * _nq, dtype=np.int64)
+    _rows_of[0::2], _rows_of[1::2] = drift_ia, drift_ib
+    _d_pair = np.full((DRIFT_N_DRAWS, _nq), np.nan)
+
+    # per word: every evaluated row of a word is drawn down to the smallest hits among these rows
+    _rows_e = np.unique(np.concatenate([drift_ia, drift_ib]))
+    _pos = np.full(n_rows, -1)
+    _pos[_rows_e] = np.arange(len(_rows_e))
+    _word_code = np.unique(row_word, return_inverse=True)[1]
+    _m_word = np.full(_word_code.max() + 1, np.iinfo(np.int64).max)
+    np.minimum.at(_m_word, _word_code[_rows_e], row_hits[_rows_e])
+    _m_row = _m_word[_word_code[_rows_e]]
+    _hsel = np.flatnonzero(_pos[hit_row] >= 0)
+    _hgroup = _pos[hit_row[_hsel]]
+    _d_word = np.full((DRIFT_N_DRAWS, _nq), np.nan)
+    _sum_vectors = np.zeros(1)
+
+    for _x in mo.status.progress_bar(range(DRIFT_N_DRAWS), title="Ziehungen"):
+        _rank = drift_rank(_group, drift_pool_speech, _rng)
+        _keep = _rank < _m_pair[drift_pool_pair]
+        _X = drift_vectors(drift_pool_hit[_keep], _group[_keep], _rows_of)
+        _d_pair[_x] = 1 - np.einsum("ij,ij->i", _X[0::2], _X[1::2])
+
+        _rank = drift_rank(_hgroup, hit_speech[_hsel], _rng)
+        _keep = _rank < _m_row[_hgroup]
+        _X = drift_vectors(_hsel[_keep], _hgroup[_keep], _rows_e)
+        _d_word[_x] = 1 - np.einsum("ij,ij->i", _X[_pos[drift_ia]], _X[_pos[drift_ib]])
+        _sum_vectors = _sum_vectors + np.nan_to_num(_X)
+
+    _X_mean = unit_rows(_sum_vectors)
+    drift_sub = {
+        "pair": np.nanmean(_d_pair, axis=0),
+        "word_distances": np.nanmean(_d_word, axis=0),
+        "word_vectors": 1 - np.einsum("ij,ij->i", _X_mean[_pos[drift_ia]], _X_mean[_pos[drift_ib]]),
+    }
+    # share of the hits of the evaluated rows that a variant uses
+    drift_used = {
+        "pair": float(2 * _m_pair.sum() / (drift_n_a + drift_n_b).sum()),
+        "word": float(_m_row.sum() / row_hits[_rows_e].sum()),
+    }
+    return DRIFT_N_DRAWS, drift_sub, drift_used
+
+
+@app.cell
+def _(
+    DRIFT_N_DRAWS,
+    H_GRID,
+    H_MAX,
+    SEED,
+    drift_n_a,
+    drift_n_b,
+    drift_null,
+    drift_pool_hit,
+    drift_pool_pair,
+    drift_pool_side,
+    drift_pool_speech,
+    drift_pooled,
+    drift_pooled_obs,
+    drift_rank,
+    drift_slice_a,
+    drift_slice_b,
+    mo,
+    np,
+):
+    # saturation curve on the probe pairs (both rows with at least H_MAX hits); mean over the probe pairs per draw
+    _rng = np.random.default_rng(SEED + 6000)
+    _probes = np.flatnonzero(np.minimum(drift_n_a, drift_n_b) >= H_MAX)
+    drift_probe_n = len(_probes)
+    drift_rare_obs = np.full((DRIFT_N_DRAWS, len(H_GRID)), np.nan)
+    drift_rare_null = np.full((DRIFT_N_DRAWS, len(H_GRID)), np.nan)
+    drift_rare_full = (np.nan, np.nan)
+
+    if drift_probe_n > 0:
+        _pp = np.full(len(drift_n_a), -1)
+        _pp[_probes] = np.arange(drift_probe_n)
+        _sel = _pp[drift_pool_pair] >= 0
+        _pair = _pp[drift_pool_pair[_sel]]
+        _side = drift_pool_side[_sel]
+        _hit = drift_pool_hit[_sel]
+        _speech = drift_pool_speech[_sel]
+        _target = 2 * _pair + _side
+        # null: two disjoint samples from the pooled hits, the second one starting at half of the pool
+        _start_b = ((drift_n_a[_probes] + drift_n_b[_probes]) // 2)[_pair]
+        _sa, _sb = drift_slice_a[_probes], drift_slice_b[_probes]
+        for _x in mo.status.progress_bar(range(DRIFT_N_DRAWS), title="Ziehungen"):
+            _r_obs = drift_rank(_target, _speech, _rng)
+            _r_null = drift_rank(_pair, _speech, _rng)
+            for _g, _h in enumerate(H_GRID):
+                _k = _r_obs < _h
+                drift_rare_obs[_x, _g] = np.nanmean(drift_pooled(_hit[_k], _target[_k], _sa, _sb))
+                _in_b = (_r_null >= _start_b) & (_r_null < _start_b + _h)
+                _k = (_r_null < _h) | _in_b
+                drift_rare_null[_x, _g] = np.nanmean(
+                    drift_pooled(_hit[_k], (2 * _pair + _in_b)[_k], _sa, _sb)
+                )
+        # all hits: observed drift with shared marginals and mean drift under permutation (actual sizes)
+        drift_rare_full = (
+            float(np.nanmean(drift_pooled_obs[_probes])),
+            float(np.nanmean(drift_null[:, _probes])),
+        )
+    return drift_probe_n, drift_rare_full, drift_rare_null, drift_rare_obs
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ### Auswertung
+
+    **Tabelle 4.1, Sättigungskurve:** je Trefferzahl h die mittlere Drift der Prüfpaare bei h Belegen je Zeile und die mittlere Drift ohne Unterschied zwischen den Zeitscheiben, gemittelt über die Ziehungen. Die letzte Zeile zeigt die Prüfpaare mit allen Belegen (ohne Unterschied: Mittel über die Permutationen).
+
+    **Tabelle 4.2, Volumenabhängigkeit:** r innerhalb der Zielwörter je Variante mit 95-%-Intervall, die Differenz der Beträge gegenüber der Rohdrift mit 95-%-Intervall und die Einstufung nach der Entscheidungsregel. Die Rangkorrelation nach Spearman (1904) gibt an, wie weit die Variante die Reihenfolge der Paare nach ihrer Drift gegenüber der Rohdrift erhält (1 = gleiche Reihenfolge). Die beiden letzten Zeilen sind Zwischengrößen der Permutationsrechnung und gehen nicht in die Entscheidung ein.
+
+    **Tabelle 4.3, Permutationstest:** je Gruppe nach der kleineren Trefferzahl eines Paars (Terzile) der Anteil der Paare mit p < 0,05. Ohne jeden Unterschied zwischen den Zeitscheiben wären etwa 5 % zu erwarten.
+    """)
+    return
+
+
+@app.cell
+def _(
+    DRIFT_FLOOR,
+    DRIFT_N_DRAWS,
+    DRIFT_N_PERM,
+    H_GRID,
+    H_MAX,
+    SEED,
+    SVD_K,
+    SVD_P,
+    drift_ia,
+    drift_n_a,
+    drift_n_b,
+    drift_null,
+    drift_pooled_obs,
+    drift_probe_n,
+    drift_rare_full,
+    drift_rare_null,
+    drift_rare_obs,
+    drift_raw,
+    drift_sub,
+    drift_used,
+    fmt_int,
+    fmt_num,
+    fmt_pct,
+    mo,
+    np,
+    pl,
+    row_word,
+    show_table,
+):
+    from scipy.stats import spearmanr as _spearmanr
+
+    DRIFT_N_BOOT = 1000
+
+    _null_mean = np.nanmean(drift_null, axis=0)
+    _ref = "Rohdrift (Referenz)"
+    # variant: (drift per pair, share of hits used, implementation)
+    _variants = {
+        _ref: (drift_raw, 1.0, "heutiger Stand von emb"),
+        "Teilstichprobe je Paar": (
+            drift_sub["pair"], drift_used["pair"],
+            "liefert einen Abstand je Paar, aber keinen Vektor je Zeile; im Bundle nur als zusätzliches Feld je Paar "
+            "darstellbar",
+        ),
+        "Teilstichprobe je Wort, Distanzen gemittelt": (
+            drift_sub["word_distances"], drift_used["word"],
+            "liefert einen Abstand je Paar, aber keinen Vektor je Zeile; im Bundle nur als zusätzliches Feld je Paar "
+            "darstellbar",
+        ),
+        "Teilstichprobe je Wort, Vektoren gemittelt": (
+            drift_sub["word_vectors"], drift_used["word"],
+            "liefert einen Vektor je Zeile und ist als Schalter in emb umsetzbar, ohne das Bundle-Schema zu ändern",
+        ),
+        "Drift abzüglich Permutationserwartung": (
+            drift_pooled_obs - _null_mean, 1.0,
+            "verwirft keine Belege; liefert Abstand und p-Wert je Paar, die im Bundle ein zusätzliches Feld brauchen",
+        ),
+    }
+    _info = {
+        "Drift mit gemeinsamen Randsummen": drift_pooled_obs,
+        "Permutationserwartung (ohne Unterschied)": _null_mean,
+    }
+    _all = {**{_n: _v[0] for _n, _v in _variants.items()}, **_info}
+
+    # common pairs: finite in every variant, words with at least two such pairs
+    _valid = np.all([np.isfinite(_x) for _x in _all.values()], axis=0)
+    _word = np.unique(row_word[drift_ia], return_inverse=True)[1]
+    _use = _valid & (np.bincount(_word[_valid], minlength=_word.max() + 1)[_word] >= 2)
+    _w = np.unique(_word[_use], return_inverse=True)[1]
+    _nw = int(_w.max()) + 1
+    _log_n = np.log(np.minimum(drift_n_a, drift_n_b)[_use].astype(np.float64))
+
+    def _demean(x):
+        return x - (np.bincount(_w, x, minlength=_nw) / np.bincount(_w, minlength=_nw))[_w]
+
+    # within-word sums per word: products, squares of drift and log hits (deviations from the word mean)
+    _dy = _demean(_log_n)
+    _sums = {}
+    for _n, _x in _all.items():
+        _dx = _demean(_x[_use].astype(np.float64))
+        _sums[_n] = [np.bincount(_w, _v, minlength=_nw) for _v in (_dx * _dy, _dx * _dx, _dy * _dy)]
+
+    def _r(sums, weights):
+        xy, xx, yy = sums
+        return (weights @ xy) / np.sqrt((weights @ xx) * (weights @ yy))
+
+    # bootstrap over words: each row of _weights counts how often each word is drawn
+    _weights = np.random.default_rng(SEED + 7000).multinomial(
+        _nw, np.full(_nw, 1 / _nw), size=DRIFT_N_BOOT
+    ).astype(np.float64)
+    _r_full = {_n: float(_r(_s, np.ones(_nw))) for _n, _s in _sums.items()}
+    _r_boot = {_n: _r(_s, _weights) for _n, _s in _sums.items()}
+
+    def _ci(x):
+        return tuple(float(_q) for _q in np.quantile(x, [0.025, 0.975]))
+
+    def _fmt_ci(x):
+        lo, hi = _ci(x)
+        return f"{fmt_num(lo)} bis {fmt_num(hi)}"
+
+    _delta = {_n: np.abs(_r_boot[_n]) - np.abs(_r_boot[_ref]) for _n in _variants if _n != _ref}
+    _classes = {}
+    for _n, _d in _delta.items():
+        _lo, _hi = _ci(_d)
+        _classes[_n] = "belastbar geringer" if _hi < 0 else "belastbar höher" if _lo > 0 else "kein belastbarer Unterschied"
+    _rho = {_n: float(_spearmanr(_x[_use], drift_raw[_use])[0]) for _n, _x in _all.items()}
+
+    # table 4.1: saturation curve
+    _rare_obs, _rare_null = drift_rare_obs.mean(axis=0), drift_rare_null.mean(axis=0)
+    _share = list(_rare_null / _rare_obs) + [drift_rare_full[1] / drift_rare_full[0]]
+    _table_rare = pl.DataFrame({
+        "Belege je Zeile": [str(_h) for _h in H_GRID] + [f"alle (≥ {H_MAX})"],
+        "Drift beobachtet": [fmt_num(_x) for _x in _rare_obs] + [fmt_num(drift_rare_full[0])],
+        "Drift ohne Unterschied": [fmt_num(_x) for _x in _rare_null] + [fmt_num(drift_rare_full[1])],
+        "ohne Unterschied / beobachtet": [fmt_pct(_x) if np.isfinite(_x) else "–" for _x in _share],
+    })
+
+    # table 4.2: volume dependence
+    _rows_vol = []
+    for _n in _all:
+        _is_variant = _n in _variants
+        _rows_vol.append({
+            "Variante": _n,
+            "Belege verwendet": fmt_pct(_variants[_n][1]) if _is_variant else "alle",
+            "r": fmt_num(_r_full[_n]),
+            "r, 95-%-Intervall": _fmt_ci(_r_boot[_n]),
+            "Δ|r| gegenüber Rohdrift": fmt_num(float(np.abs(_r_full[_n]) - np.abs(_r_full[_ref])), 3) if _n != _ref else "–",
+            "Δ|r|, 95-%-Intervall": _fmt_ci(_delta[_n]) if _n in _delta else "–",
+            "Einstufung": _classes.get(_n, "Referenz" if _n == _ref else "zur Information"),
+            "Rangkorrelation mit Rohdrift": fmt_num(_rho[_n]),
+        })
+
+    # table 4.3: permutation test by terciles of the smaller hits of a pair
+    _p = (1 + (drift_null >= drift_pooled_obs[None, :]).sum(axis=0)) / (1 + DRIFT_N_PERM)
+    _low = np.minimum(drift_n_a, drift_n_b)
+    _ok = np.isfinite(drift_pooled_obs)
+    _idx = np.flatnonzero(_ok)
+    _rank = np.empty(len(_idx), dtype=np.int64)
+    _rank[np.argsort(_low[_idx], kind="stable")] = np.arange(len(_idx))
+    _groups = {"alle Paare": _idx}
+    for _g, _name in enumerate(["geringe Textmenge", "mittlere Textmenge", "hohe Textmenge"]):
+        _m = _idx[_rank * 3 // len(_idx) == _g]
+        if len(_m):
+            _groups[f"{_name} ({_low[_m].min()}–{_low[_m].max()} Belege)"] = _m
+    _table_perm = pl.DataFrame([
+        {
+            "Gruppe": _g,
+            "Paare": fmt_int(len(_m)),
+            "Anteil p < 0,05": fmt_pct(float((_p[_m] < 0.05).mean())),
+            "Drift mit gemeinsamen Randsummen": fmt_num(float(np.mean(drift_pooled_obs[_m]))),
+            "Permutationserwartung": fmt_num(float(np.nanmean(_null_mean[_m]))),
+        }
+        for _g, _m in _groups.items()
+    ])
+
+    # verdict
+    _lo0, _hi0 = _ci(_r_boot[_ref])
+    _text = [
+        f"Ausgewertet: {fmt_int(_use.sum())} Paare aus {fmt_int(_nw)} Zielwörtern (beide Zeilen mindestens "
+        f"{DRIFT_FLOOR} Belege, mindestens zwei Paare je Zielwort). SVD mit k = {SVD_K}, p = {SVD_P:g}; "
+        f"{DRIFT_N_DRAWS} Ziehungen, {DRIFT_N_PERM} Permutationen, {DRIFT_N_BOOT} Bootstrap-Wiederholungen.",
+        f"Sättigungskurve ({fmt_int(drift_probe_n)} Prüfpaare): Bei {H_GRID[0]} Beleg(en) je Zeile beträgt die Drift "
+        f"ohne Unterschied {fmt_pct(_share[0]) if np.isfinite(_share[0]) else '–'} der beobachteten, bei {H_MAX} "
+        f"Belegen {fmt_pct(_share[-2]) if np.isfinite(_share[-2]) else '–'}, mit allen Belegen "
+        f"{fmt_pct(_share[-1]) if np.isfinite(_share[-1]) else '–'}.",
+        f"Permutationserwartung: r = {fmt_num(_r_full['Permutationserwartung (ohne Unterschied)'])} "
+        f"(95-%-Intervall {_fmt_ci(_r_boot['Permutationserwartung (ohne Unterschied)'])}). So stark hinge die Drift "
+        "allein über den Stichprobenumfang von der Trefferzahl ab, wenn sich die Zeitscheiben nicht unterschieden.",
+        f"Permutationstest: Bei {fmt_pct(float((_p[_ok] < 0.05).mean()))} der Paare liegt die beobachtete Drift über "
+        "dem, was ohne Unterschied zu erwarten wäre (p < 0,05; ohne jeden Unterschied etwa 5 %).",
+    ]
+    if not (_hi0 < 0 or _lo0 > 0):
+        _text.append(
+            f"Rohdrift: r = {fmt_num(_r_full[_ref])} (95-%-Intervall {_fmt_ci(_r_boot[_ref])}). Das Intervall schließt 0 "
+            "ein; eine Abhängigkeit der Drift von der Trefferzahl ist in diesen Daten nicht nachweisbar."
+        )
+        _kind = "success"
+        _rec = "**Empfehlung:** kein Eingriff; die Drift wird wie bisher aus den Vektoren der vollständigen Daten berechnet."
+    else:
+        _text.append(
+            f"Rohdrift: r = {fmt_num(_r_full[_ref])} (95-%-Intervall {_fmt_ci(_r_boot[_ref])}). "
+            + (
+                "Ein Wort zeigt zwischen schwach belegten Zeitscheiben belastbar eine größere Drift als zwischen gut "
+                "belegten."
+                if _hi0 < 0
+                else "Ein Wort zeigt zwischen gut belegten Zeitscheiben belastbar eine größere Drift als zwischen "
+                "schwach belegten; das entspricht nicht dem erwarteten Stichprobeneffekt (s. Einschränkungen)."
+            )
+        )
+        _better = [_n for _n, _c in _classes.items() if _c == "belastbar geringer"]
+        _worse = [_n for _n, _c in _classes.items() if _c == "belastbar höher"]
+        if _worse:
+            _text.append("Belastbar höhere Volumenabhängigkeit als die Rohdrift: " + "; ".join(_worse) + ".")
+        if not _better:
+            _kind = "warn"
+            _rec = (
+                "**Empfehlung:** Keine Variante verringert die Volumenabhängigkeit belastbar. Es bleibt bei der "
+                "Rohdrift; die Trefferzahl `n_hits` je Zeile liegt im Bundle vor, die Anzeige regelt das Frontend."
+            )
+        else:
+            _best = min(_better, key=lambda n: abs(_r_full[n]))
+            _equivalent = []
+            for _n in _better:
+                if _n != _best:
+                    _lo, _hi = _ci(np.abs(_r_boot[_n]) - np.abs(_r_boot[_best]))
+                    if _lo <= 0 <= _hi:
+                        _equivalent.append(_n)
+            _kind = "success"
+            _rec = (
+                f"**Empfehlung: {_best}** (r = {fmt_num(_r_full[_best])} gegenüber {fmt_num(_r_full[_ref])} der "
+                f"Rohdrift; verwendet {fmt_pct(_variants[_best][1])} der Belege; {_variants[_best][2]})."
+            )
+            if _equivalent:
+                _rec += " Gleichwertig in |r|: " + "; ".join(
+                    f"{_n} (r = {fmt_num(_r_full[_n])}; verwendet {fmt_pct(_variants[_n][1])} der Belege; "
+                    f"{_variants[_n][2]})"
+                    for _n in _equivalent
+                ) + ". Zwischen gleichwertigen Varianten entscheiden Belegverlust und Umsetzbarkeit."
+
+    mo.vstack([
+        mo.md("**Tabelle 4.1: Sättigungskurve**"),
+        show_table(_table_rare),
+        mo.md("**Tabelle 4.2: Volumenabhängigkeit der Drift**"),
+        show_table(pl.DataFrame(_rows_vol)),
+        mo.md("**Tabelle 4.3: Permutationstest nach Textmenge**"),
+        show_table(_table_perm),
+        mo.md("\n\n".join(_text)),
+        mo.callout(mo.md(_rec), kind=_kind),
+    ])
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ### Einschränkungen
+
+    - Die Volumenabhängigkeit unterscheidet nicht zwischen einem Stichprobeneffekt und echtem Wandel, der mit der Trefferzahl einhergeht: Über ein Wort wird oft gerade dann viel geredet, wenn sich sein Kontext ändert (Methodology 1.18). Eine solche positive Abhängigkeit kann einen negativen Stichprobeneffekt in r der Rohdrift teilweise verdecken. r der Permutationserwartung enthält nur den Stichprobeneffekt.
+    - r misst eine lineare Abhängigkeit von der logarithmierten Trefferzahl. Eine Abhängigkeit, die nur bei sehr kleinen Trefferzahlen auftritt, zeigt die Sättigungskurve deutlicher.
+    - Ausgewertet werden nur benachbarte Zeitscheiben. Paare über Lücken hinweg und Abstände über mehrere Zeitscheiben werden nicht geprüft.
+    - Die Untergrenze `DRIFT_FLOOR` ist eine Konvention. Die Paare darunter, bei denen der Stichprobeneffekt am größten ist, gehen nicht ein; für die Zeilen darunter gelten die Abschnitte 1 und 2.
+    - Die Teilstichproben je Wort hängen von der schwächsten ausgewerteten Zeile eines Worts ab: Eine einzige schwach belegte Zeitscheibe bestimmt die Trefferzahl aller Zeitscheiben des Worts.
+    - Neu berechnete Zeilen werden in den Raum der vollständigen Daten projiziert, an dessen SVD die vollständigen Zeilen beteiligt sind (wie in Abschnitt 1).
+    - In der Permutationsrechnung erhalten beide Zeilen eines Paars dieselben Randsummen. Unterschiede zwischen den Zeitscheiben, die nur in den Randsummen liegen, also in den Kontexten aller übrigen Zielwörter, gehen in diese Rechnung nicht ein; in die Rohdrift gehen sie ein.
+    - Die Ziehung nach Reden teilt höchstens eine Rede je Zeile bzw. je Paar auf.
+    - Die p-Werte je Paar sind nicht für multiples Testen korrigiert. Der Anteil unter 0,05 ist mit den etwa 5 % zu vergleichen, die ohne jeden Unterschied zu erwarten sind; er sagt nicht, welche einzelnen Paare sich unterscheiden.
+    - Das Ergebnis gilt für k, p, Raster und KWIC-Variante dieses Laufs und ist nach jeder Änderung neu zu bestimmen.
+
+    ### Literatur
+
+    - Bland, J. M. & Altman, D. G. (1995): Calculating correlation coefficients with repeated observations: Part 1 – correlation within subjects. *BMJ* 310(6977), 446.
+    - Davison, A. C. & Hinkley, D. V. (1997): *Bootstrap Methods and their Application*. Cambridge University Press.
+    - Dubossarsky, H., Weinshall, D. & Grossman, E. (2017): Outta control: Laws of semantic change and inherent biases in word representation models. In: *Proceedings of EMNLP 2017*, 1136–1145.
+    - Efron, B. & Tibshirani, R. J. (1993): *An Introduction to the Bootstrap*. Chapman & Hall.
+    - Good, P. (2005): *Permutation, Parametric and Bootstrap Tests of Hypotheses*. 3. Aufl. Springer.
+    - Hamilton, W. L., Leskovec, J. & Jurafsky, D. (2016): Diachronic word embeddings reveal statistical laws of semantic change. In: *Proceedings of ACL 2016*, 1489–1501.
+    - Hurlbert, S. H. (1971): The nonconcept of species diversity: a critique and alternative parameters. *Ecology* 52(4), 577–586.
+    - Kutuzov, A., Øvrelid, L., Szymanski, T. & Velldal, E. (2018): Diachronic word embeddings and semantic shifts: a survey. In: *Proceedings of COLING 2018*, 1384–1397.
+    - Phipson, B. & Smyth, G. K. (2010): Permutation p-values should never be zero: calculating exact p-values when permutations are randomly drawn. *Statistical Applications in Genetics and Molecular Biology* 9(1), Art. 39.
+    - Sanders, H. L. (1968): Marine benthic diversity: a comparative study. *The American Naturalist* 102(925), 243–282.
+    - Spearman, C. (1904): The proof and measurement of association between two things. *The American Journal of Psychology* 15(1), 72–101.
 
     Weitere Angaben zum Messverfahren s. Abschnitt 1. Die bibliografischen Angaben sind vor einer Veröffentlichung an den Originalen zu prüfen.
     """)

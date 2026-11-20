@@ -20,6 +20,8 @@ uv run python internal/speedtest/speedtest.py --label akku # mit Zusatz im Ergeb
 uv run python internal/speedtest/speedtest.py --prepare    # Datenauszug neu erzeugen
 ```
 
+Wichtig: Im Ordner data vorher die Datei corpus_UNZIPME.zip zu corpus.csv entpacken.
+
 ## Auf einem anderen Rechner
 
 Nötig sind das Repo mit `uv sync` und den Modellen in `assets/` (`scripts/fetch_assets.py`) und der

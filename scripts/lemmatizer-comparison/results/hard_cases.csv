@@ -1,0 +1,104 @@
+cat,sentence,target,gold,stanza,stanza_pos,spacy,spacy_pos,simplemma,simplemma_greedy,ok_stanza,ok_spacy,ok_simplemma,ok_simplemma_greedy
+Feminina,Die Soldatinnen kehren aus Mali zurück.,Soldatinnen,Soldatin,Soldatin,NOUN,Soldatinn,NOUN,Soldatin,Soldatin,true,false,true,true
+Feminina,Wir danken allen Bürgerinnen und Bürgern.,Bürgerinnen,Bürgerin,Bürgerin,NOUN,Bürgerin,NOUN,Bürgerin,Bürgerin,true,true,true,true
+Feminina,"Liebe Kolleginnen und Kollegen, ich beginne.",Kolleginnen,Kollegin,Kollegin,NOUN,Kollegin,NOUN,Kollegin,Kollegin,true,true,true,true
+Feminina,Die Ministerinnen der Länder haben beraten.,Ministerinnen,Ministerin,Ministerin,NOUN,Ministerinn,NOUN,Ministerin,Ministerin,true,false,true,true
+Feminina,Die Präsidentinnen der Gerichte waren anwesend.,Präsidentinnen,Präsidentin,Präsidentin,NOUN,Präsidentinn,NOUN,Präsidentin,Präsidentin,true,false,true,true
+Feminina,Viele Ärztinnen arbeiten in Teilzeit.,Ärztinnen,Ärztin,Ärztin,NOUN,Ärztinne,NOUN,Ärztin,Ärztin,true,false,true,true
+Feminina,Die Polizistinnen wurden angegriffen.,Polizistinnen,Polizistin,Polizistin,NOUN,Polizistinne,NOUN,Polizistin,Polizistin,true,false,true,true
+Feminina,Die Wählerinnen haben entschieden.,Wählerinnen,Wählerin,Wählerin,NOUN,Wählerin,NOUN,Wählerin,Wählerin,true,true,true,true
+Feminina,Die Rede der Bundeskanzlerin war kurz.,Bundeskanzlerin,Bundeskanzlerin,Bundeskanzlerin,NOUN,Bundeskanzlerin,NOUN,Bundeskanzlerin,Bundeskanzlerin,true,true,true,true
+Feminina,Wir unterstützen die Lehrerinnen an den Schulen.,Lehrerinnen,Lehrerin,Lehrerin,NOUN,Lehrerin,NOUN,Lehrerin,Lehrerin,true,true,true,true
+Feminina,Die Unternehmerinnen fordern Entlastung.,Unternehmerinnen,Unternehmerin,Unternehmerin,NOUN,Unternehmerin,NOUN,Unternehmerin,Unternehmerin,true,true,true,true
+Feminina,Zwei Abgeordnetinnen fehlen.,Abgeordnetinnen,Abgeordnetin|Abgeordnete,Abgeordnetin,NOUN,Abgeordnetinn,NOUN,Abgeordnetinnen,Abgeordnetinnen,true,false,false,false
+Feminina,Die Soldatin wurde befördert.,Soldatin,Soldatin,Soldatin,NOUN,Soldatin,NOUN,Soldatin,Soldatin,true,true,true,true
+Feminina,Wir reden mit den Rentnerinnen.,Rentnerinnen,Rentnerin,Rentnerin,NOUN,Rentnerinn,NOUN,Rentnerin,Rentnerin,true,false,true,true
+Feminina,Die Pflegerinnen verdienen mehr Geld.,Pflegerinnen,Pflegerin,Pflegerin,NOUN,Pflegerinn,NOUN,Pflegerin,Pflegerin,true,false,true,true
+Genderzeichen roh,Die Soldat*innen kehren zurück.,Soldat*innen,Soldat|Soldatin,Soldat+*+innen,NOUN+PUNCT+ADV,Soldat*inn,NOUN,Soldat:innen,Soldat:innen,false,false,false,false
+Genderzeichen roh,Die Bürger:innen haben ein Recht darauf.,Bürger:innen,Bürger|Bürgerin,Bürger+:+innen,NOUN+PUNCT+ADV,Bürger+--+innen,NOUN+PUNCT+ADV,Bürger:innen,Bürger:innen,false,false,false,false
+Genderzeichen roh,Die SoldatInnen kehren zurück.,SoldatInnen,Soldat|Soldatin,SoldatIn,NOUN,SoldatInnen,NOUN,Soldat:innen,Soldat:innen,false,false,false,false
+Genderzeichen roh,Die Kolleg_innen sind da.,Kolleg_innen,Kollege|Kollegin,Kolleg_n,NOUN,Kolleg_inne,NOUN,Kollegin,Kollegin,false,false,true,true
+Genderzeichen roh,Die Lehrer/-innen streiken.,Lehrer/-innen,Lehrer|Lehrerin,Lehrer+-+innen,NOUN+PUNCT+NOUN,Lehrer/-inne,NOUN,Lehrer/-innen,Lehrer/-innen,false,false,false,false
+Plural/Umlaut,Die Mütter brauchen Unterstützung.,Mütter,Mutter,Mutter,NOUN,Mutter,NOUN,Mutter,Mutter,true,true,true,true
+Plural/Umlaut,Die Verträge wurden unterzeichnet.,Verträge,Vertrag,Vertrag,NOUN,Vertrag,NOUN,Vertrag,Vertrag,true,true,true,true
+Plural/Umlaut,Alle Anträge wurden abgelehnt.,Anträge,Antrag,Antrag,NOUN,Antrag,NOUN,Antrag,Antrag,true,true,true,true
+Plural/Umlaut,Die Ausschüsse tagen morgen.,Ausschüsse,Ausschuss,Ausschuß,NOUN,Ausschuß,NOUN,Ausschuss,Ausschuß,false,false,true,false
+Plural/Umlaut,In vielen Ländern herrscht Krieg.,Ländern,Land,Land,NOUN,Land,NOUN,Land,Land,true,true,true,true
+Plural/Umlaut,Die Häuser wurden zerstört.,Häuser,Haus,Haus,NOUN,Haus,NOUN,Haus,Haus,true,true,true,true
+Plural/Umlaut,Die Gespräche dauern an.,Gespräche,Gespräch,Gespräch,NOUN,Gespräch,NOUN,Gespräch,Gespräch,true,true,true,true
+Plural/Umlaut,Die Städte und Gemeinden klagen.,Städte,Stadt,Stadt,NOUN,Stadt,NOUN,Stadt,Stadt,true,true,true,true
+Plural/Umlaut,Wir brauchen mehr Kräfte.,Kräfte,Kraft,Kraft,NOUN,Kraft,NOUN,Kraft,Kraft,true,true,true,true
+Plural/Umlaut,Die Gesetze treten in Kraft.,Gesetze,Gesetz,Gesetz,NOUN,Gesetz,NOUN,Gesetz,Gesetz,true,true,true,true
+Plural/Umlaut,Die Interessen der Bürger zählen.,Interessen,Interesse,Interesse,NOUN,Interesse,NOUN,Interesse,Interesse,true,true,true,true
+Plural/Umlaut,Die Museen bleiben geöffnet.,Museen,Museum,Museum,NOUN,Museum,NOUN,Museum,Museum,true,true,true,true
+Plural/Umlaut,Die Themen sind wichtig.,Themen,Thema,Thema,NOUN,Thema,NOUN,Thema,Thema,true,true,true,true
+Plural/Umlaut,Die Konten wurden gesperrt.,Konten,Konto,Konto,NOUN,Konto,NOUN,Konto,Konto,true,true,true,true
+Kontextabhängig,Die Banken müssen mehr Eigenkapital vorhalten.,Banken,Bank,Bank,NOUN,Bank,NOUN,Bank,Bank,true,true,true,true
+Kontextabhängig,Auf den Bänken im Park sitzen Rentner.,Bänken,Bank,Bank,NOUN,Bank,NOUN,Bank,Bank,true,true,true,true
+Kontextabhängig,Die Steuern wurden erhöht.,Steuern,Steuer,Steuer,NOUN,Steuer,NOUN,Steuer,Steuer,true,true,true,true
+Kontextabhängig,Wir müssen die Migration besser steuern.,steuern,steuern,steuern,VERB,steuern,VERB,steuern,steuern,true,true,true,true
+Kontextabhängig,Die Mieten steigen in den Städten.,Mieten,Miete,Miete,NOUN,Miete,NOUN,Miete,Miete,true,true,true,true
+Kontextabhängig,Viele Familien können keine Wohnung mieten.,mieten,mieten,mienen,VERB,mieten,VERB,mieten,mieten,false,true,true,true
+Kontextabhängig,Die Kosten sind gestiegen.,Kosten,Kosten,Kosten,NOUN,Kosten,NOUN,Kosten,Kosten,true,true,true,true
+Kontextabhängig,Das wird uns Milliarden kosten.,kosten,kosten,kosten,VERB,kosten,VERB,kosten,kosten,true,true,true,true
+Kontextabhängig,Die Wahlen finden im September statt.,Wahlen,Wahl,Wahl,NOUN,Wahl,NOUN,Wahl,Wahl,true,true,true,true
+Kontextabhängig,Wir wählen heute den Präsidenten.,wählen,wählen,wählen,VERB,wählen,VERB,wählen,wählen,true,true,true,true
+Kontextabhängig,Die Bauern protestieren in Berlin.,Bauern,Bauer,Bauer,NOUN,Bauer,NOUN,Bauer,Bauer,true,true,true,true
+Kontextabhängig,Sie bauen neue Wohnungen.,bauen,bauen,bauen,VERB,bauen,VERB,bauen,bauen,true,true,true,true
+Kontextabhängig,Das ist sein Antrag.,sein,sein,sein,DET,sein,DET,sein,sein,true,true,true,true
+Kontextabhängig,Er wurde zum Vorsitzenden gewählt.,wurde,werden,werden,AUX,werden,AUX,werden,werden,true,true,true,true
+Kontextabhängig,Die Mittel wurden gekürzt.,Mittel,Mittel,Mittel,NOUN,Mittel,NOUN,Mittel,Mittel,true,true,true,true
+Kontextabhängig,Wir tun dir gern den Gefallen.,Gefallen,Gefallen,Gefallen,NOUN,Gefallen,NOUN,Gefallen,Gefallen,true,true,true,true
+Kontextabhängig,Die Grünen haben zugestimmt.,Grünen,Grüne,grüne,PROPN,grüne,NOUN,Grüne,Grüne,false,false,true,true
+Kontextabhängig,Die Linke stimmt dagegen.,Linke,Linke,Linke,NOUN,linke,NOUN,Linker,Linker,true,false,false,false
+Kontextabhängig,Die Weisen haben ein Gutachten vorgelegt.,Weisen,Weise,Weise,NOUN,weise,NOUN,Weiser,Weiser,true,false,false,false
+Kontextabhängig,Das Ergebnis der Wahl ist klar.,Wahl,Wahl,Wahl,NOUN,Wahl,NOUN,Wahl,Wahl,true,true,true,true
+Verben,Er ging nach Hause.,ging,gehen,gehen,VERB,gehen,VERB,gehen,gehen,true,true,true,true
+Verben,Das ist nie so gewesen.,gewesen,sein,sein,AUX,sein,AUX,sein,sein,true,true,true,true
+Verben,Die Regierung brachte den Entwurf ein.,brachte,bringen|einbringen,bringen,VERB,bringen,VERB,bringen,bringen,true,true,true,true
+Verben,Daran hat niemand gedacht.,gedacht,denken,denken,VERB,denken,VERB,gedenken,gedenken,true,true,false,false
+Verben,Der Bundestag hat das Gesetz beschlossen.,beschlossen,beschließen,beschließen,VERB,beschließen,VERB,beschließen,beschließen,true,true,true,true
+Verben,Die Sitzung hat gestern stattgefunden.,stattgefunden,stattfinden,stattfinden,VERB,stattfinden,VERB,stattfinden,stattfinden,true,true,true,true
+Verben,Der Minister ist zurückgetreten.,zurückgetreten,zurücktreten,zurücktreten,ADJ,zurücktreten,VERB,zurücktreten,zurücktreten,true,true,true,true
+Verben,Die Preise stiegen stark.,stiegen,steigen,steigen,VERB,steigen,VERB,steigen,steigen,true,true,true,true
+Verben,Wir haben viel erreicht.,erreicht,erreichen,erreichen,VERB,erreichen,VERB,erreichen,erreichen,true,true,true,true
+Verben,Russland hat die Ukraine überfallen.,überfallen,überfallen,überfallen,VERB,überfallen,VERB,überfallen,überfallen,true,true,true,true
+Verben,Sie hielt eine Rede.,hielt,halten,halten,VERB,halten,VERB,halten,halten,true,true,true,true
+Verben,Wir verhandelten lange.,verhandelten,verhandeln,verhandeln,VERB,verhandelen,VERB,verhandeln,verhandeln,true,false,true,true
+Verben,Die Truppen zogen ab.,zogen,ziehen|abziehen,ziehen,VERB,ziehen,VERB,ziehen,ziehen,true,true,true,true
+Verben,Sie wussten davon.,wussten,wissen,wissen,VERB,wussen,VERB,wissen,wissen,true,false,true,true
+Adjektive,Wir brauchen bessere Lösungen.,bessere,gut,gut,ADJ,gut,ADJ,gut,gut,true,true,true,true
+Adjektive,Das ist die höchste Inflation seit Jahren.,höchste,hoch,hoch,ADJ,hoch,ADJ,hoch,hoch,true,true,true,true
+Adjektive,Es gibt größere Probleme.,größere,groß,groß,ADJ,groß,ADJ,groß,groß,true,true,true,true
+Adjektive,Die russischen Truppen marschieren.,russischen,russisch,russisch,ADJ,russisch,ADJ,russisch,russisch,true,true,true,true
+Adjektive,Mit dem neuen Gesetz wird alles anders.,neuen,neu,neu,ADJ,neu,ADJ,neu,neu,true,true,true,true
+Adjektive,Das sind die ärmsten Länder.,ärmsten,arm,arm,ADJ,arm,ADJ,arm,arm,true,true,true,true
+Adjektive,Die militärische Unterstützung wird fortgesetzt.,militärische,militärisch,militärisch,ADJ,militärisch,ADJ,militärisch,militärisch,true,true,true,true
+Nominalisiert,Die Geflüchteten brauchen Wohnungen.,Geflüchteten,Geflüchtete|Geflüchteter,Geflüchtet,NOUN,Geflüchtet,NOUN,Geflüchtete,Geflüchtete,false,false,true,true
+Nominalisiert,Die Zahl der Arbeitslosen sinkt.,Arbeitslosen,Arbeitslose|Arbeitsloser,Arbeitslose,NOUN,arbeitslose,NOUN,Arbeitslose,Arbeitslose,true,false,true,true
+Nominalisiert,Der Vorsitzende eröffnet die Sitzung.,Vorsitzende,Vorsitzende|Vorsitzender,Vorsitzende,NOUN,vorsitzend,NOUN,Vorsitzende,Vorsitzende,true,false,true,true
+Nominalisiert,Viele Deutsche reisen gern.,Deutsche,Deutsche|Deutscher,deutsch,NOUN,deutsche,NOUN,Deutscher,Deutscher,false,false,true,true
+Nominalisiert,Die Abgeordneten stimmen ab.,Abgeordneten,Abgeordnete|Abgeordneter,Abgeordnete,NOUN,abgeordneter,NOUN,Abgeordneter,Abgeordneter,true,false,true,true
+Nominalisiert,Die Verletzten wurden versorgt.,Verletzten,Verletzte|Verletzter,Verletzte,NOUN,verletzter,NOUN,Verletzter,Verletzte,true,false,true,true
+Nominalisiert,Die Beschäftigten streiken.,Beschäftigten,Beschäftigte|Beschäftigter,Beschäftigter,NOUN,beschäftigter,NOUN,Beschäftigte,Beschäftigte,true,false,true,true
+Nominalisiert,Die Angehörigen trauern.,Angehörigen,Angehörige|Angehöriger,Angehörige,NOUN,angehörige,NOUN,Angehörige,Angehörige,true,false,true,true
+Komposita,Die Drohnenabwehrsysteme kommen zu spät.,Drohnenabwehrsysteme,Drohnenabwehrsystem,Drohnenabwehrsystem,NOUN,Drohnenabwehrsystem,NOUN,Drohnenabwehrsysteme,Drohnenabwehrsystem,true,true,false,true
+Komposita,Die Mittel des Sondervermögens sind verplant.,Sondervermögens,Sondervermögen,Sondervermögen,NOUN,Sondervermögen,NOUN,Sondervermögen,Sondervermögen,true,true,true,true
+Komposita,Die Rüstungsexporte nehmen zu.,Rüstungsexporte,Rüstungsexport,Rüstungsexport,NOUN,Rüstungsexport,NOUN,Rüstungsexport,Rüstungsexport,true,true,true,true
+Komposita,Die Bundeswehreinsätze werden verlängert.,Bundeswehreinsätze,Bundeswehreinsatz,Bundeswehreinsatz,NOUN,Bundeswehreinsatz,NOUN,Bundeswehreinsatz,Bundeswehreinsatz,true,true,true,true
+Komposita,Die Flüchtlingsunterkünfte sind voll.,Flüchtlingsunterkünfte,Flüchtlingsunterkunft,Flüchtlingsunterkunft,NOUN,Flüchtlingsunterkünft,NOUN,Flüchtlingsunterkunft,Flüchtlingsunterkunft,true,false,true,true
+Komposita,Die Energiepreisbremsen wirken.,Energiepreisbremsen,Energiepreisbremse,Energiepreisbremse,NOUN,Energiepreisbremsen,NOUN,Energiepreisbremsen,Energiepreisbremsen,true,false,false,false
+Komposita,Die Haushaltsberatungen beginnen.,Haushaltsberatungen,Haushaltsberatung,Haushaltsberatung,NOUN,Haushaltsberatung,NOUN,Haushaltsberatung,Haushaltsberatung,true,true,true,true
+Komposita,Die Waffenlieferungen an die Ukraine gehen weiter.,Waffenlieferungen,Waffenlieferung,Waffenlieferung,NOUN,Waffenlieferung,NOUN,Waffenlieferung,Waffenlieferung,true,true,true,true
+Komposita,Die Corona-Hilfen wurden ausgezahlt.,Corona-Hilfen,Corona-Hilfe,Corona+-+Hilfe,PROPN+PUNCT+NOUN,Corona-Hilfen,NOUN,Corona-Hilfe,Corona-Hilfe,false,false,true,true
+Komposita,Die Klimaschutzverträge sind beschlossen.,Klimaschutzverträge,Klimaschutzvertrag,Klimaschutzvertrag,NOUN,Klimaschutzvertrag,NOUN,Klimaschutzverträge,Klimaschutzvertrag,true,true,false,true
+Komposita,Die Wärmepumpen sind teuer.,Wärmepumpen,Wärmepumpe,Wärmepumpe,NOUN,Wärmepumpe,NOUN,Wärmepumpe,Wärmepumpe,true,true,true,true
+Komposita,Die Lieferketten sind gestört.,Lieferketten,Lieferkette,Lieferkette,NOUN,Lieferkett,NOUN,Lieferkette,Lieferkette,true,false,true,true
+Eigennamen,Die Politik Russlands ist aggressiv.,Russlands,Russland,Rußlands,PROPN,Russland,PROPN,Russlands,Russlands,false,true,false,false
+Eigennamen,Putins Krieg muss enden.,Putins,Putin,Putin,PROPN,Putin,PROPN,Putins,Putins,true,true,false,false
+Eigennamen,Selenskyjs Rede war bewegend.,Selenskyjs,Selenskyj,Selenskyjs,PROPN,Selenskyjs,NOUN,Selenskyjs,Selenskyjs,false,false,false,false
+Eigennamen,Die Zukunft Europas steht auf dem Spiel.,Europas,Europa,Europa,PROPN,Europa,PROPN,Europa,Europa,true,true,true,true
+Eigennamen,Die Interessen Deutschlands zählen.,Deutschlands,Deutschland,Deutschland,PROPN,Deutschland,PROPN,Deutschland,Deutschland,true,true,true,true
+Eigennamen,Die Haltung Chinas ist unklar.,Chinas,China,China,PROPN,China,PROPN,Chinas,Chinas,true,true,false,false
+Eigennamen,Scholz' Regierung ist gescheitert.,Scholz',Scholz,Scholz',PROPN,Scholz+',PROPN+PROPN,Scholz',Scholz',false,false,false,false
+Eigennamen,Die Politik der NATO ist klar.,NATO,NATO|Nato,NATO,PROPN,NATO,PROPN,NATO,NATO,true,true,true,true

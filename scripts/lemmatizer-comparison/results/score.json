@@ -1,0 +1,88 @@
+{
+ "types_scored": 192,
+ "tokens_scored": 1130,
+ "strict": {
+  "stanza": {
+   "tokens_correct": 775,
+   "share": 0.6858
+  },
+  "spacy": {
+   "tokens_correct": 782,
+   "share": 0.692
+  },
+  "simplemma": {
+   "tokens_correct": 791,
+   "share": 0.7
+  }
+ },
+ "orthography_tolerant": {
+  "stanza": {
+   "tokens_correct": 931,
+   "share": 0.8239
+  },
+  "spacy": {
+   "tokens_correct": 786,
+   "share": 0.6956
+  },
+  "simplemma": {
+   "tokens_correct": 819,
+   "share": 0.7248
+  }
+ },
+ "errors_strict_by_class": {
+  "stanza": [
+   {
+    "class": "alte Rechtschreibung",
+    "n": 156
+   },
+   {
+    "class": "sonstiger Fehler",
+    "n": 129
+   },
+   {
+    "class": "unverändert gelassen",
+    "n": 64
+   },
+   {
+    "class": "Nomen klein geschrieben",
+    "n": 6
+   }
+  ],
+  "spacy": [
+   {
+    "class": "sonstiger Fehler",
+    "n": 174
+   },
+   {
+    "class": "Nomen klein geschrieben",
+    "n": 135
+   },
+   {
+    "class": "unverändert gelassen",
+    "n": 35
+   },
+   {
+    "class": "alte Rechtschreibung",
+    "n": 4
+   }
+  ],
+  "simplemma": [
+   {
+    "class": "sonstiger Fehler",
+    "n": 187
+   },
+   {
+    "class": "unverändert gelassen",
+    "n": 122
+   },
+   {
+    "class": "alte Rechtschreibung",
+    "n": 28
+   },
+   {
+    "class": "Nomen klein geschrieben",
+    "n": 2
+   }
+  ]
+ }
+}

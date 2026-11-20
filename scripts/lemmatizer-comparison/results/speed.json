@@ -1,0 +1,20 @@
+{
+ "n_texts": 3000,
+ "n_chars": 440233,
+ "n_words_stanza": 72376,
+ "seconds": {
+  "stanza": 24.51,
+  "spacy": 3.17,
+  "simplemma": 0.056
+ },
+ "words_per_second": {
+  "stanza": 2953,
+  "spacy": 22797,
+  "simplemma": 1294219
+ },
+ "speedup_vs_stanza": {
+  "spacy": 7.7,
+  "simplemma": 438.2
+ },
+ "note": "CPU only, torch threads=16; spaCy single process"
+}

@@ -1,0 +1,349 @@
+{
+ "lemma": {
+  "stanza=spacy": {
+   "all": {
+    "agree": 61063,
+    "n": 63893,
+    "share": 0.9557
+   },
+   "content": {
+    "agree": 25740,
+    "n": 27590,
+    "share": 0.9329
+   },
+   "NOUN": {
+    "agree": 13083,
+    "n": 13998,
+    "share": 0.9346
+   },
+   "DET": {
+    "agree": 9720,
+    "n": 10049,
+    "share": 0.9673
+   },
+   "ADP": {
+    "agree": 7503,
+    "n": 7512,
+    "share": 0.9988
+   },
+   "VERB": {
+    "agree": 5283,
+    "n": 5479,
+    "share": 0.9642
+   },
+   "ADJ": {
+    "agree": 4424,
+    "n": 4954,
+    "share": 0.893
+   },
+   "ADV": {
+    "agree": 4903,
+    "n": 4948,
+    "share": 0.9909
+   },
+   "PRON": {
+    "agree": 3964,
+    "n": 4335,
+    "share": 0.9144
+   },
+   "AUX": {
+    "agree": 3061,
+    "n": 3230,
+    "share": 0.9477
+   },
+   "PROPN": {
+    "agree": 2950,
+    "n": 3159,
+    "share": 0.9338
+   },
+   "CCONJ": {
+    "agree": 2830,
+    "n": 2832,
+    "share": 0.9993
+   },
+   "NUM": {
+    "agree": 1172,
+    "n": 1208,
+    "share": 0.9702
+   },
+   "SCONJ": {
+    "agree": 1132,
+    "n": 1144,
+    "share": 0.9895
+   },
+   "PART": {
+    "agree": 1029,
+    "n": 1030,
+    "share": 0.999
+   },
+   "X": {
+    "agree": 9,
+    "n": 15,
+    "share": 0.6
+   }
+  },
+  "stanza=simplemma": {
+   "all": {
+    "agree": 62142,
+    "n": 63893,
+    "share": 0.9726
+   },
+   "content": {
+    "agree": 26042,
+    "n": 27590,
+    "share": 0.9439
+   },
+   "NOUN": {
+    "agree": 13518,
+    "n": 13998,
+    "share": 0.9657
+   },
+   "DET": {
+    "agree": 10006,
+    "n": 10049,
+    "share": 0.9957
+   },
+   "ADP": {
+    "agree": 7503,
+    "n": 7512,
+    "share": 0.9988
+   },
+   "VERB": {
+    "agree": 5283,
+    "n": 5479,
+    "share": 0.9642
+   },
+   "ADJ": {
+    "agree": 4390,
+    "n": 4954,
+    "share": 0.8862
+   },
+   "ADV": {
+    "agree": 4902,
+    "n": 4948,
+    "share": 0.9907
+   },
+   "PRON": {
+    "agree": 4282,
+    "n": 4335,
+    "share": 0.9878
+   },
+   "AUX": {
+    "agree": 3229,
+    "n": 3230,
+    "share": 0.9997
+   },
+   "PROPN": {
+    "agree": 2851,
+    "n": 3159,
+    "share": 0.9025
+   },
+   "CCONJ": {
+    "agree": 2832,
+    "n": 2832,
+    "share": 1.0
+   },
+   "NUM": {
+    "agree": 1173,
+    "n": 1208,
+    "share": 0.971
+   },
+   "SCONJ": {
+    "agree": 1131,
+    "n": 1144,
+    "share": 0.9886
+   },
+   "PART": {
+    "agree": 1028,
+    "n": 1030,
+    "share": 0.9981
+   },
+   "X": {
+    "agree": 14,
+    "n": 15,
+    "share": 0.9333
+   }
+  },
+  "spacy=simplemma": {
+   "all": {
+    "agree": 60759,
+    "n": 63893,
+    "share": 0.9509
+   },
+   "content": {
+    "agree": 25402,
+    "n": 27590,
+    "share": 0.9207
+   },
+   "NOUN": {
+    "agree": 13062,
+    "n": 13998,
+    "share": 0.9331
+   },
+   "DET": {
+    "agree": 9748,
+    "n": 10049,
+    "share": 0.97
+   },
+   "ADP": {
+    "agree": 7503,
+    "n": 7512,
+    "share": 0.9988
+   },
+   "VERB": {
+    "agree": 5177,
+    "n": 5479,
+    "share": 0.9449
+   },
+   "ADJ": {
+    "agree": 4224,
+    "n": 4954,
+    "share": 0.8526
+   },
+   "ADV": {
+    "agree": 4864,
+    "n": 4948,
+    "share": 0.983
+   },
+   "PRON": {
+    "agree": 3969,
+    "n": 4335,
+    "share": 0.9156
+   },
+   "AUX": {
+    "agree": 3060,
+    "n": 3230,
+    "share": 0.9474
+   },
+   "PROPN": {
+    "agree": 2939,
+    "n": 3159,
+    "share": 0.9304
+   },
+   "CCONJ": {
+    "agree": 2830,
+    "n": 2832,
+    "share": 0.9993
+   },
+   "NUM": {
+    "agree": 1201,
+    "n": 1208,
+    "share": 0.9942
+   },
+   "SCONJ": {
+    "agree": 1143,
+    "n": 1144,
+    "share": 0.9991
+   },
+   "PART": {
+    "agree": 1029,
+    "n": 1030,
+    "share": 0.999
+   },
+   "X": {
+    "agree": 10,
+    "n": 15,
+    "share": 0.6667
+   }
+  },
+  "all3": {
+   "all": {
+    "agree": 60201,
+    "n": 63893,
+    "share": 0.9422
+   },
+   "content": {
+    "agree": 24935,
+    "n": 27590,
+    "share": 0.9038
+   },
+   "NOUN": {
+    "agree": 12921,
+    "n": 13998,
+    "share": 0.9231
+   },
+   "DET": {
+    "agree": 9715,
+    "n": 10049,
+    "share": 0.9668
+   },
+   "ADP": {
+    "agree": 7499,
+    "n": 7512,
+    "share": 0.9983
+   },
+   "VERB": {
+    "agree": 5138,
+    "n": 5479,
+    "share": 0.9378
+   },
+   "ADJ": {
+    "agree": 4065,
+    "n": 4954,
+    "share": 0.8205
+   },
+   "ADV": {
+    "agree": 4861,
+    "n": 4948,
+    "share": 0.9824
+   },
+   "PRON": {
+    "agree": 3964,
+    "n": 4335,
+    "share": 0.9144
+   },
+   "AUX": {
+    "agree": 3060,
+    "n": 3230,
+    "share": 0.9474
+   },
+   "PROPN": {
+    "agree": 2811,
+    "n": 3159,
+    "share": 0.8898
+   },
+   "CCONJ": {
+    "agree": 2830,
+    "n": 2832,
+    "share": 0.9993
+   },
+   "NUM": {
+    "agree": 1169,
+    "n": 1208,
+    "share": 0.9677
+   },
+   "SCONJ": {
+    "agree": 1131,
+    "n": 1144,
+    "share": 0.9886
+   },
+   "PART": {
+    "agree": 1028,
+    "n": 1030,
+    "share": 0.9981
+   },
+   "X": {
+    "agree": 9,
+    "n": 15,
+    "share": 0.6
+   }
+  }
+ },
+ "pos_stanza_vs_spacy": {
+  "all": {
+   "agree": 59262,
+   "n": 63893,
+   "share": 0.9275
+  },
+  "content": {
+   "agree": 24219,
+   "n": 27590,
+   "share": 0.8778
+  }
+ },
+ "gender_nouns_stanza_vs_spacy": {
+  "agree": 12913,
+  "n": 13998,
+  "share": 0.9225
+ }
+}

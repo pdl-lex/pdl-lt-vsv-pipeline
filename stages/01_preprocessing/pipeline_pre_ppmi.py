@@ -1351,6 +1351,108 @@ def _(out_dir, pl, run_id):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
+    ## Alte Rechtschreibung (ß) in den Lemmata korrigieren
+    Stanza gibt viele Lemmata in der Schreibung vor 1996 aus, auch wenn der Text sie neu schreibt: `dass` → `daß`, `Ausschuss` → `Ausschuß`, `bewusst` → `bewußt`, `Prozess` → `Prozeß` (im Bundestagslauf rund 150 Lemmata, 20.000 Tokens). Für die PPMI ist das harmlos, weil es einheitlich geschieht, aber die Nachbarwörter im Bundle stünden in alter Schreibung.
+
+    Eine feste Regel ß → ss geht nicht: `beschließen`, `groß`, `Maßnahme`, `weiß` sind richtig, obwohl der Text `beschlossen` oder `größer` schreibt. Deshalb entscheidet der Wortschatz des Laufs:
+    * Ein Lemma mit ß wird durch seine ss-Schreibung ersetzt, wenn diese in den Kontexten (Originaltext, Kleinschreibung egal) mindestens 30-mal so häufig als Wort vorkommt wie die ß-Schreibung (`Ausschuss` 1.539 : `Ausschuß` 0; `beschliessen` 0 : `beschließen` 986).
+    * Der hohe Faktor schützt Paare, bei denen beide Schreibungen echte Wörter sind (`Buße`/`Busse`) und Namen (`Heß`, `Krauß`). Eine kleine Ausnahmeliste fängt Restfehler ab.
+    * Lemmata, deren ss-Schreibung im Lauf nirgends als Wort vorkommt, bleiben unverändert (z. B. `mißglückt`, Bundestagslauf: wenige Dutzend Tokens).
+
+    Die Zuordnung wird als `output/<variante>/spelling_map_<projekt>_<variante>.csv` gespeichert. Der Schritt läuft vor „Movierte Feminina“ und braucht keine neue Lemmatisierung. Wörter der Zielwortliste sind nicht betroffen, sie haben ihr Lemma bereits aus der Liste.
+    """)
+    return
+
+
+@app.function
+def spelling_map(kwic_hits_lemmatized, min_ratio=30, overrides=None):
+    """
+    Map context lemmas in old German orthography (ß after a short vowel, e.g. "Ausschuß", "daß")
+    to the reformed spelling, using the vocabulary of the run; returns a DataFrame
+    old, new, n_lemma, n_word_old, n_word_new (lazy in, eager out).
+
+    For every lemma with "ß", the candidate is the lemma with all "ß" replaced by "ss". It is
+    taken if the candidate occurs as a word in the original context texts at least `min_ratio`
+    times as often as the lemma itself (case-insensitive), so correct ß lemmas whose ss form
+    does not occur ("beschließen", "groß", "Maßnahme") and pairs of real words ("Buße"/"Busse")
+    stay. overrides: {old: new or None}, applied last (None = keep).
+    """
+    import polars as pl
+
+    lemmas = (
+        kwic_hits_lemmatized.select(pl.col("context_lemmas").alias("lemma"))
+        .explode("lemma")
+        .filter(pl.col("lemma").str.contains("ß"))
+        .group_by("lemma")
+        .len()
+        .collect()
+    )
+    # word counts of the original texts (target form included), only words with ß or ss
+    text = pl.concat_str(
+        [pl.col(c).fill_null("") for c in ("context_before", "target_form", "context_after")], separator=" "
+    )
+    words = (
+        kwic_hits_lemmatized.select(text.str.to_lowercase().str.extract_all(r"\w+").alias("word"))
+        .explode("word")
+        .filter(pl.col("word").str.contains("ß|ss"))
+        .group_by("word")
+        .len()
+        .collect()
+    )
+    n_word = dict(zip(words["word"], words["len"]))
+
+    result = {}
+    for lemma, count in zip(lemmas["lemma"], lemmas["len"]):
+        new = lemma.replace("ß", "ss")
+        n_old, n_new = n_word.get(lemma.lower(), 0), n_word.get(new.lower(), 0)
+        if n_new > 0 and n_new >= min_ratio * n_old:
+            result[lemma] = (new, count, n_old, n_new)
+    n_lemma = dict(zip(lemmas["lemma"], lemmas["len"]))
+    for old, new in (overrides or {}).items():
+        if new is None:
+            result.pop(old, None)
+        elif old in n_lemma:
+            result[old] = (new, n_lemma[old], n_word.get(old.lower(), 0), n_word.get(new.lower(), 0))
+    schema = {"old": pl.Utf8, "new": pl.Utf8, "n_lemma": pl.Int64, "n_word_old": pl.Int64, "n_word_new": pl.Int64}
+    return pl.DataFrame(
+        [(o, *v) for o, v in result.items()], schema=schema, orient="row"
+    ).sort("n_lemma", "old", descending=[True, False])
+
+
+@app.cell
+def _(mo):
+    fix_spelling = mo.ui.checkbox(value=True, label="Alte Rechtschreibung (ß) in den Lemmata korrigieren")
+    fix_spelling
+    return (fix_spelling,)
+
+
+@app.cell
+def _(fix_spelling, kwic_hits_lemmatized, out_dir, pl, run_id):
+    # residual errors of the vocabulary rule (checked on the Bundestag run, punkt, 2026-11-20)
+    SPELLING_OVERRIDES = {
+        "flößen": None,  # would be "flössen"
+    }
+
+    if not fix_spelling.value:
+        kwic_hits_spelling = kwic_hits_lemmatized
+        print("Alte Rechtschreibung: ausgeschaltet")
+    else:
+        spellings = spelling_map(kwic_hits_lemmatized, overrides=SPELLING_OVERRIDES)
+        spellings.write_csv(out_dir / f"spelling_map_{run_id}.csv")
+        _map = dict(zip(spellings["old"], spellings["new"]))
+        kwic_hits_spelling = kwic_hits_lemmatized.with_columns(
+            pl.col("context_lemmas").list.eval(pl.element().replace(_map))
+        )
+        print(
+            f"Alte Rechtschreibung: {spellings.height:,} Lemmata, "
+            f"{spellings['n_lemma'].sum():,} Tokens korrigiert"
+        )
+    return (kwic_hits_spelling,)
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
     ## Movierte Feminina auf die Grundform zurückführen
     Das Geschlecht wird nicht unterschieden: Personenbezeichnungen auf *-in* (movierte Feminina) werden unter den Kontextwörtern auf die maskuline Grundform zurückgeführt (`Bürgerin` → `Bürger`, `Kollegin` → `Kollege`, `Ärztin` → `Arzt`). Zusammen mit dem Mapping vor Stanza (`Bürger*innen`, `BürgerInnen` → `Bürgerinnen` → `Bürgerin`) führen damit alle Schreibungen auf eine Dimension.
 
@@ -1446,7 +1548,8 @@ def _(mo):
 
 
 @app.cell
-def _(demove_feminines, kwic_hits_lemmatized, out_dir, pl, run_id):
+def _(demove_feminines, kwic_hits_spelling, out_dir, pl, run_id):
+    # input: the lemmatized hits after the spelling correction (kwic_hits_spelling)
     # residual errors of the vocabulary search (checked on the Bundestag run, punkt, 2026-11-17)
     FEMININE_OVERRIDES = {
         "Polin": "Pole",  # would be "Pol"
@@ -1454,16 +1557,16 @@ def _(demove_feminines, kwic_hits_lemmatized, out_dir, pl, run_id):
     }
 
     if not demove_feminines.value:
-        kwic_hits_contexts = kwic_hits_lemmatized
+        kwic_hits_contexts = kwic_hits_spelling
         print("Movierte Feminina: ausgeschaltet")
-    elif "context_gender" not in kwic_hits_lemmatized.collect_schema().names():
-        kwic_hits_contexts = kwic_hits_lemmatized
+    elif "context_gender" not in kwic_hits_spelling.collect_schema().names():
+        kwic_hits_contexts = kwic_hits_spelling
         print("Movierte Feminina: Lauf ohne Spalte context_gender, Lemmatisierung neu starten")
     else:
-        feminine_bases = feminine_base_map(kwic_hits_lemmatized, FEMININE_OVERRIDES)
+        feminine_bases = feminine_base_map(kwic_hits_spelling, FEMININE_OVERRIDES)
         feminine_bases.write_csv(out_dir / f"feminine_base_map_{run_id}.csv")
         _map = dict(zip(feminine_bases["feminine"], feminine_bases["base"]))
-        kwic_hits_contexts = kwic_hits_lemmatized.with_columns(
+        kwic_hits_contexts = kwic_hits_spelling.with_columns(
             pl.col("context_lemmas").list.eval(pl.element().replace(_map))
         )
         print(
@@ -1557,7 +1660,8 @@ def _(
 ):
     # add Quartale, Halbjahre and Jahre to the lists, which up to now only have dates
     # lazy: the plan is written to parquet in streaming mode and also used for the counts below
-    # (kwic_hits_contexts = lemmatized hits, feminine context lemmas reduced to the base form)
+    # (kwic_hits_contexts = lemmatized hits, old ß spellings corrected, feminine context lemmas
+    # reduced to the base form)
     kwic_hits_sliced = slice_kwic_hits(
         kwic_hits_contexts, corpus, slice_grid_picker.value, facet_columns, MISSING_FACET_VALUE
     )

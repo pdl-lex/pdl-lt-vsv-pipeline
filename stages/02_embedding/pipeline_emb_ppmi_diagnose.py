@@ -40,7 +40,7 @@ def _(mo):
 
     Alle Abschnitte verwenden dasselbe Messverfahren, das vorab einmal beschrieben wird. Jeder Abschnitt ist gleich aufgebaut: Verfahren, Fragestellung, Methode, erwartete Ergebnisse und ihre Deutung, Entscheidungsregel, Vorprüfung, Berechnung, automatische Auswertung mit Empfehlung, Einschränkungen, Literatur. Die Auswertung leitet ihre Aussagen ausschließlich aus den Werten ab, die im selben Lauf berechnet werden. Ergebnisse früherer Messungen werden nicht übernommen.
 
-    Das frühere Diagnose-Notebook (`pipeline_emb_ppmi_diagnose_alt.py`, Glättung und Rang der SVD) bleibt unverändert erhalten.
+    Das frühere Diagnose-Notebook (`pipeline_emb_ppmi_diagnose_alt.py`, Glättung und Rang der SVD) ist gelöscht; seine Ergebnisse stehen in `internal/Readme Scientific Methodology.md` (Messreihe C).
     """)
     return
 
@@ -179,15 +179,24 @@ def _(mo):
 
     ### Grundgedanke: Split-half-Prüfung
 
-    Die Reden jeder Zeitscheibe werden zufällig in zwei gleich große Hälften A und B geteilt. Aus jeder Hälfte wird eine eigene PPMI-Matrix berechnet, mit denselben Randsummen je Zeitscheibe wie in emb. Beide Hälften stammen aus derselben Zeitscheibe. Unterschiede zwischen ihnen sind deshalb Zufallsschwankungen der Stichprobe und kein Bedeutungswandel. Eine Zeile ist reliabel, wenn sie in beiden Hälften ähnlich abgebildet wird und sich zugleich von anderen Zeilen unterscheidet. Das Vorgehen folgt der Split-half-Methode zur Schätzung der Reliabilität (Spearman 1910; Brown 1910). Die Stabilität von Wortvektoren wird in der Literatur ebenfalls durch Neuziehen ganzer Dokumente geprüft (Antoniak & Mimno 2018).
+    Die Reden jeder Zeitscheibe werden zufällig in zwei gleich große Hälften A und B geteilt. Aus jeder Hälfte wird eine eigene PPMI-Matrix berechnet, mit denselben Randsummen je Zeitscheibe wie in emb. Beide Hälften stammen aus derselben Zeitscheibe. Unterschiede zwischen ihnen sind deshalb Zufallsschwankungen der Stichprobe und kein Bedeutungswandel. Eine Zeile ist reliabel, wenn sie in beiden Hälften ähnlich abgebildet wird und sich zugleich von anderen Zeilen unterscheidet. Anders formuliert: Eine Zeile (Zielwort in einer Zeitscheibe) soll in beiden Hälften einen möglichst gleichen Vektor erhalten, der sich möglichst klar von den Vektoren anderer Zeilen unterscheidet. Dann bildet der Vektor (mutmaßlich) etwas Systematisches im Sprachgebrauch ab und nicht nur Grundrauschen. Ob das die Bedeutung ist (Validität) und ob sie sich über die Zeit wandelt (Drift), prüft die Split-half-Prüfung nicht.
+    Das Vorgehen folgt der Split-half-Methode zur Schätzung der Reliabilität (Spearman 1910; Brown 1910). Die Stabilität von Wortvektoren wird in der Literatur ebenfalls durch Neuziehen ganzer Dokumente geprüft (Antoniak & Mimno 2018).
 
-    Geteilt wird nach Reden, nicht nach einzelnen Belegen. Belege aus derselben Rede sind nicht unabhängig voneinander (derselbe Redner, dasselbe Thema, wiederholte Formulierungen). Lägen sie in beiden Hälften, wären die Hälften einander künstlich ähnlich.
+    Geteilt wird nach Reden, nicht nach einzelnen Belegen. Belege aus derselben Rede sind nicht unabhängig voneinander (derselbe Redner, dasselbe Thema, wiederholte Formulierungen). Lägen sie in beiden Hälften, wären die Hälften einander künstlich ähnlich. (grouped split)
 
-    Die Teilung wird mehrfach mit verschiedenen Zufallszahlen wiederholt (Anzahl: `N_SPLITS` unten). Alle Abschnitte verwenden dieselben Teilungen.
+    Es werden N_SPLITS verschiedene Teilungen ausgelost (feste Zufallszahl SEED, daher reproduzierbar). Alle Abschnitte rechnen auf genau diesen Teilungen; Unterschiede zwischen Parametern gehen deshalb nicht auf unterschiedliche Teilungen zurück.
 
     ### SVD und *folding-in*
 
-    Gemessen wird an den Vektoren nach der SVD, weil sie die Grundlage aller späteren Schritte sind. Die SVD wird an einer Hälfte berechnet (k und p wie in emb). Die Zeilen beider Hälften werden anschließend in diesen Raum projiziert (*folding-in*, Deerwester et al. 1990; Berry, Dumais & O'Brien 1995): Eine Zeile $m$ der PPMI-Matrix erhält den Vektor $m \, V_k \, \Sigma_k^{p-1}$. Für die Zeilen der Hälfte, an der die SVD berechnet wurde, ist das identisch mit $U_k \Sigma_k^p$ wie in emb. Eine SVD der vollständigen Daten würde die beiden Hälften künstlich ähnlich machen, weil beide in dieselbe Zerlegung eingehen. Die Rechnung wird in beiden Richtungen durchgeführt (SVD an A, dann an B), die Kennwerte werden gemittelt.
+    Gemessen wird an den Vektoren nach der SVD, weil sie die Grundlage aller späteren Schritte sind. Die SVD wird an einer Hälfte berechnet (k und p wie in emb). Sie zerlegt deren PPMI-Matrix in $U_k \Sigma_k V_k^\top$:
+
+    $U_k$ (Zeilen × k): Koordinaten der Zeilen dieser Hälfte,
+    $\Sigma_k$: die k Singulärwerte,
+    $V_k$ (Kontextwörter × k): Gewicht jedes Kontextworts auf jeder Achse; $V_k$ legt die Achsen fest.
+
+    Die Zeilen beider Hälften werden anschließend auf diese Achsen projiziert (folding-in, Deerwester et al. 1990; Berry, Dumais & O'Brien 1995): Eine Zeile $m$ der PPMI-Matrix (ein Wert je Kontextwort) wird mit $V_k$ multipliziert und mit den Singulärwerten gewichtet, $x = m \, V_k \, \Sigma_k^{p-1}$. Aus einem Wert je Kontextwort werden so k Koordinaten. Das ist eine feste Rechnung ohne weitere Entscheidungen. Beide Hälften verwenden dieselben Kontextwörter als Spalten; fehlt eines in einer Hälfte, steht dort 0. Für die Zeilen der Hälfte, an der die SVD berechnet wurde, ergibt die Formel genau $U_k \Sigma_k^p$ wie in emb.
+
+    Die andere Hälfte bestimmt die Achsen also nicht mit, sondern wird nur auf ihnen abgebildet (wie Trainings- und Testteil im maschinellen Lernen). Eine SVD der vollständigen Daten würde die Achsen auf beide Hälften zuschneiden und sie damit künstlich ähnlich machen. Die Rechnung wird in beiden Richtungen durchgeführt (SVD an A, B projiziert; dann umgekehrt), die Kennwerte werden gemittelt.
 
     ### Kennwerte
 
@@ -387,7 +396,7 @@ def _(mo):
 
     In emb geht jede Zeile in die SVD ein, unabhängig davon, auf wie vielen Belegen sie beruht. Das PPMI-Profil einer Zeile mit wenigen Belegen hängt stark davon ab, welche Belege zufällig vorliegen. Bei kleiner Randsumme der Zeile erhalten die wenigen beobachteten Kontexte zudem hohe PMI-Werte (zur Überschätzung seltener Ereignisse durch PMI: Levy, Goldberg & Dagan 2015). Solche Zeilen können im Raum als Ausreißer oder als scheinbar starke Verschiebung erscheinen.
 
-    Vorgesehen ist eine dokumentierte Mindesttrefferzahl: Zeilen mit weniger Belegen sollen die SVD nicht mitbestimmen. Ob ein solcher Eingriff die übrigen Zeilen verbessert, prüft Abschnitt 2. Dieser Abschnitt bestimmt, wo die Schwelle liegt.
+    Gesucht ist eine dokumentierte Mindesttrefferzahl, ab der eine Zeile gedeutet werden kann (Zuverlässigkeitsschwelle). Zeilen darunter bleiben im Raum und werden markiert. Ob sie zusätzlich die SVD nicht mitbestimmen sollen, prüft Abschnitt 2. Dieser Abschnitt bestimmt, wo die Schwelle liegt.
 
     ### Fragestellung
 
@@ -395,7 +404,7 @@ def _(mo):
 
     ### Methode
 
-    **Kontrollierte Teilstichproben (Hauptmessung).** Ausgewählt werden die gut belegten Zeilen: Zeilen mit mindestens `H_MAX` Belegen in jeder der beiden Hälften einer Teilung (Prüfzeilen). Für jede Prüfzeile werden in jeder Hälfte genau h Belege gezogen, für jedes h aus `H_GRID`. Aus diesen h Belegen wird die Zeile neu berechnet (PPMI mit den Randsummen der Hälfte, dann *folding-in*) und ihre Kennwerte gegen die übrigen Zeilen bestimmt. Die Vergleichszeilen bleiben dabei unverändert. Dieselbe Zeile wird so bei verschiedenen Trefferzahlen gemessen. Unterschiede zwischen den h gehen damit allein auf die Trefferzahl zurück und nicht darauf, welche Wörter selten sind.
+    **Kontrollierte Teilstichproben (Hauptmessung).** Ausgewählt werden die gut belegten Zeilen: Zeilen mit mindestens `H_MAX` Belegen in jeder der beiden Hälften einer Teilung (Prüfzeilen). Das ist notwendig, damit alle Werte aus `H_GRID` innerhalb derselben Zeilen gemessen werden können. Für jede Prüfzeile werden in jeder Hälfte genau h Belege gezogen, für jedes h aus `H_GRID`. Aus diesen h Belegen wird die Zeile neu berechnet (PPMI mit den Randsummen der Hälfte, dann *folding-in*) und ihre Kennwerte gegen die übrigen Zeilen bestimmt. Die Vergleichszeilen bleiben dabei unverändert. Dieselbe Zeile wird so bei verschiedenen Trefferzahlen gemessen. Unterschiede zwischen den h gehen damit allein auf die Trefferzahl zurück und nicht darauf, welche Wörter selten sind.
 
     Gezogen wird nach Reden, wie bei der Teilung: Die Reden der Zeile werden in zufällige Reihenfolge gebracht und ihre Belege so lange übernommen, bis h Belege erreicht sind; aus der letzten Rede werden zufällig so viele Belege genommen, wie noch fehlen. So bleibt die Bündelung der Belege in Reden erhalten, wie sie in schwach belegten Zeilen tatsächlich vorkommt. Die Stichproben sind geschachtelt: Die Stichprobe für ein kleineres h ist Teil der Stichprobe für ein größeres h. Das verringert die Zufallsschwankung zwischen benachbarten Werten von h.
 
@@ -418,7 +427,7 @@ def _(mo):
     - Voraussetzung: Die Prüfzeilen erreichen mit allen Belegen ihrer Hälfte das Niveau in allen Teilungen. Sonst ist keine Schwelle bestimmbar.
     - **Zufallsgrenze h₀** (zur Information): derselbe Wert für das Kriterium „a_zeit über 0,5 in allen Teilungen“, d. h. die Zeile hebt sich überhaupt von den anderen Zeitscheiben desselben Worts ab.
     - Die Gegenprobe wird nach derselben Regel ausgewertet, über die Gruppen statt über h. Gruppen mit im Mittel weniger als `MIN_ROWS_GROUP` Zeilen gehen nicht in die Regel ein. Ergibt die Gegenprobe einen höheren Wert, nennt die Auswertung beide Werte.
-    - Empfohlen wird h\* als Mindesttrefferzahl einer Zeile der vollständigen Daten.
+    - Empfohlen wird h\* als Zuverlässigkeitsschwelle für die Deutung einer Zeile der vollständigen Daten. Die Schwelle heißt „wiedererkennbar“, nicht „frei von Grundrauschen“: Für den Abstand zweier Zeilen (Drift) reicht sie nicht ohne Weiteres aus (Abschnitt 4).
     """)
     return
 
@@ -429,6 +438,12 @@ def _(mo):
     ### Vorprüfung
 
     Wie viele Zeilen und Belege lägen unter einer Schwelle? Die Tabelle zeigt für jeden Wert aus `H_GRID` die Zahl der Zeilen der vollständigen Daten mit weniger Belegen, ihren Anteil an allen Zeilen und den Anteil ihrer Belege an allen Belegen.
+
+    **Lesehilfe:**
+
+    - Die Tabelle bewertet nichts, sie zeigt den Preis einer Schwelle: wie viele Zeilen (Zielwort × Zeitscheibe) unter ihr lägen und wie viel Text sie tragen.
+    - Zu vergleichen sind die beiden Anteile. Liegt der Anteil der Zeilen weit über dem Anteil der Belege, sind die Trefferzahlen sehr ungleich verteilt: Viele Zeilen beruhen auf wenigen Belegen, der meiste Text liegt in wenigen gut belegten Zeilen.
+    - Ein hoher Anteil Zeilen unter der späteren Schwelle h\* bedeutet, dass viele Zeitscheiben vieler Wörter nicht deutbar sind. Das betrifft die Auswahl der Zielwörter und das Zeitraster, nicht das Verfahren.
     """)
     return
 
@@ -587,6 +602,22 @@ def _(mo):
     **Teilstichproben:** je Trefferzahl h der Mittelwert über die Prüfzeilen, gemittelt über die Teilungen, dazu der niedrigste Wert einer einzelnen Teilung und die Zahl der Teilungen, die das Niveau bzw. die Zufallsgrenze überschreiten. Die letzte Zeile zeigt die Prüfzeilen mit allen Belegen ihrer Hälfte (Obergrenze der Kurve).
 
     **Gegenprobe:** natürliche Zeilen, gruppiert nach der Zahl ihrer Belege in der kleineren Hälfte; Zeilen je Gruppe als Mittel über die Teilungen.
+
+    **Lesehilfe Teilstichproben:**
+
+    - Jede Zeile der Tabelle misst dieselben Prüfzeilen mit h Belegen je Hälfte. Unterschiede zwischen den Tabellenzeilen gehen deshalb nur auf die Trefferzahl zurück.
+    - **a_zeit** (Skala 0 bis 1) ist der Kennwert der Entscheidung. 0,5 heißt: Die eigene zweite Hälfte ist nicht ähnlicher als eine andere Zeitscheibe desselben Worts, die Zeile ist nicht wiederzuerkennen (Zufallserwartung). 1 heißt: immer wiedererkannt. Übliche Einordnung einer AUC (Hosmer & Lemeshow 2000): ab 0,7 akzeptabel, ab 0,8 ausgezeichnet, ab 0,9 hervorragend. Werte knapp unter 0,5 bei kleinem h sind Zufallsschwankung, keine echte Umkehr.
+    - **Teilungen ≥ 0,7** und **niedrigste Teilung**: Die Regel verlangt das Niveau in allen Teilungen. h\* ist die erste Tabellenzeile, ab der dort dauerhaft „20 von 20“ steht. Ein Mittelwert über 0,7 genügt allein nicht.
+    - **Teilungen > 0,5** bestimmt ebenso die Zufallsgrenze h₀: ab hier hebt sich eine Zeile überhaupt von den anderen Zeitscheiben ihres Worts ab.
+    - **Letzte Tabellenzeile** („alle“): die Obergrenze, die die Prüfzeilen mit allen Belegen erreichen. Sie muss das Niveau erreichen, sonst ist keine Schwelle bestimmbar. Je näher die Kurve ihr bei h\* schon ist, desto weniger bringt eine höhere Schwelle.
+    - **a_wort** steht nur zur Information. Es liegt schon bei sehr wenigen Belegen hoch, weil sich verschiedene Zielwörter leicht unterscheiden lassen, und taugt deshalb nicht als Kriterium. Das Problem schwach belegter Zeilen ist die Abgrenzung von den anderen Zeitscheiben desselben Worts.
+    - Gut ist ein kleines h\* bei einer hohen Obergrenze. h\* heißt „wiedererkennbar“, nicht „frei von Grundrauschen“ (Abschnitt 4, Sättigungskurve).
+
+    **Lesehilfe Gegenprobe:**
+
+    - Die Gruppen enthalten verschiedene Wörter. Die Werte vermischen deshalb die Trefferzahl mit den Eigenschaften der Wörter (etwa: seltene Wörter, die sich zwischen den Zeitscheiben wenig unterscheiden). Sie sind eine Plausibilitätsprüfung, keine Messung der Schwelle.
+    - **Zeilen** und **in der Regel**: Kleine Gruppen (unter `MIN_ROWS_GROUP`) gehen nicht in die Regel ein.
+    - Erreichen die natürlichen Zeilen das Niveau erst bei mehr Belegen als die Teilstichproben, ist h\* eine Untergrenze; erreichen sie es früher, ist h\* vorsichtig gewählt. Es gilt in beiden Fällen h\* aus den Teilstichproben, sofern die Auswertung nichts anderes nennt.
     """)
     return
 
@@ -736,9 +767,9 @@ def _(
 
     if h_star is not None and h_star > H_GRID[0]:
         _text.append(
-            f"**Empfehlung:** Mindesttrefferzahl {h_star} Belege je Zeile (`MIN_HITS_FIT = {h_star}` in emb, "
-            f"Niveau {_lvl}). Ob der Fit der SVD ohne die Zeilen darunter die übrigen Zeilen verbessert, ist "
-            f"damit nicht gezeigt; das prüft Abschnitt 2. Die Schwelle gilt für k = {SVD_K}, "
+            f"**Empfehlung:** Zuverlässigkeitsschwelle {h_star} Belege je Zeile (Niveau {_lvl}): Zeilen darunter "
+            "werden markiert, nicht entfernt. Ob die SVD ohne diese Zeilen berechnet werden soll (`MIN_HITS_FIT` in "
+            f"emb), ist damit nicht gezeigt; das prüft Abschnitt 2. Die Schwelle gilt für k = {SVD_K}, "
             f"p = {SVD_P:g} und dieses Raster und ist nach einer Änderung neu zu bestimmen."
         )
     elif h_star is not None:
@@ -817,7 +848,7 @@ def _(mo):
 
     Wie in Abschnitt 1 gilt die Trefferzahl der jeweiligen Hälfte, weil eine Hälfte mit h Belegen einer Zeile der vollständigen Daten mit h Belegen entspricht. Die SVD wird in beiden Richtungen berechnet, die Kennwerte werden gemittelt.
 
-    **Bewertungszeilen** sind die Zeilen mit mindestens N Belegen in beiden Hälften; sie werden in beiden Richtungen gefittet. Verglichen werden a_zeit und a_wort dieser Zeilen in F(N) und R. Die Vergleichszeilen sind in beiden Varianten dieselben, nur der Raum unterscheidet sich. Die **Gruppen nach Textmenge** (Terzile) entstehen, indem die Zeilen mit mindestens N Belegen nach ihrer Trefferzahl in den vollständigen Daten in drei gleich große Gruppen geteilt werden.
+    **Bewertungszeilen** sind die Zeilen mit mindestens N Belegen in beiden Hälften; sie werden in beiden Richtungen gefittet. Verglichen werden a_zeit und a_wort dieser Zeilen in F(N) und R. Die Vergleichszeilen sind in beiden Varianten dieselben, nur der Raum unterscheidet sich. Die **Gruppen nach Textmenge** (Terzile) entstehen je Teilung, indem die Bewertungszeilen dieser Teilung nach ihrer Trefferzahl in den vollständigen Daten in drei gleich große Gruppen geteilt werden. Die Gruppengrenzen schwanken deshalb geringfügig zwischen den Teilungen; angegeben ist der Median über die Teilungen.
 
     Zur Information wird berichtet, wie sich die Kennwerte der Zeilen ändern, die in keiner Richtung gefittet werden (weniger als N Belege in beiden Hälften).
 
@@ -842,6 +873,14 @@ def _(mo):
     | kein belastbarer Unterschied | alle übrigen Fälle |
 
     Maßgeblich für die Empfehlung ist die Einstufung bei N = h\* aus Abschnitt 1. Bei einer Verbesserung wird empfohlen, die SVD ohne die Zeilen unter h\* zu berechnen (`MIN_HITS_FIT = h*` in emb). In allen anderen Fällen wird empfohlen, die SVD unverändert zu lassen und die Zeilen nur zu markieren. Die übrigen Schwellen dienen zur Information.
+
+    ### Vorprüfung
+
+    **Lesehilfe:**
+
+    - Je Schwelle N stehen drei Anteile der Zeilen unter N nebeneinander: an der Zahl der Zeilen, an der quadrierten Gesamtnorm der PPMI-Matrix und an den Hebelwerten (wie stark die Zeilen die k Achsen bestimmen).
+    - Entscheidend ist **Hebelwerte / Zeilen**. Bei 1 bestimmen die Zeilen unter N die Achsen im Verhältnis ihrer Zahl. Über 1 bestimmen sie die Achsen überproportional mit; dann kann ihr Ausschluss etwas bewirken. Unter 1 ist kaum eine Wirkung zu erwarten.
+    - Die Vorprüfung zeigt nur, ob eine Wirkung möglich ist. Ob sie eintritt und in welche Richtung, zeigt erst der Split-half-Vergleich.
     """)
     return
 
@@ -954,6 +993,16 @@ def _(mo):
     ### Auswertung
 
     **Übersicht:** je Schwelle N die mittlere Änderung F(N) minus R über alle Bewertungszeilen und die Zahl der Teilungen mit positiver Änderung, die Einstufung nach der Entscheidungsregel und zur Information die Änderung bei den Zeilen, die in keiner Richtung gefittet werden. **Gruppen:** dieselben Änderungen getrennt nach Textmenge.
+
+    **Lesehilfe:**
+
+    - **Δ a_zeit, Δ a_wort**: Differenz zweier AUC-Werte (F(N) minus Referenz). Positiv heißt: Die gut belegten Zeilen werden ohne die schwach belegten besser wiedererkannt. 0,01 entspricht einem Prozentpunkt der AUC. Änderungen im Bereich von Tausendsteln sind inhaltlich unerheblich, auch wenn sie belastbar sind.
+    - **Δ > 0**: in wie vielen Teilungen die Änderung positiv ist. „20 von 20“ heißt belastbar gestiegen, „0 von 20“ belastbar gesunken, alles dazwischen uneinheitlich.
+    - **Einstufung**: maßgeblich ist nur die Zeile N = h\* aus Abschnitt 1; die übrigen N stehen zur Information.
+    - **Δ, nicht gefittet**: der Preis des Eingriffs. Negative Werte heißen, dass die ausgeschlossenen Zeilen selbst schlechter dargestellt werden. Eine Verbesserung für die gut belegten Zeilen ist gegen diesen Verlust abzuwägen.
+    - **„nicht berechenbar“** heißt: In einer Hälfte gibt es höchstens k gefittete Zeilen, die SVD lässt sich nicht berechnen. Bei großem N kann das vorkommen.
+    - **Gruppen nach Textmenge**: Die Gruppen sind Drittel der Bewertungszeilen. Bei großem N umfasst auch die Gruppe „geringe Textmenge“ nur gut belegte Zeilen; die Grenzen stehen in der Gruppenbezeichnung.
+    - Gut für den Eingriff wäre: bei N = h\* eine Verbesserung von spürbarer Größe, ohne nennenswerten Verlust bei den nicht gefitteten Zeilen. Sonst bleibt die SVD an allen Zeilen, und die Zeilen unter h\* werden nur markiert.
     """)
     return
 
@@ -1005,19 +1054,25 @@ def _(
     for _n in N_CANDIDATES:
         _eval = half_min >= _n
         _unfitted = half_max < _n
-        # terciles of the rows with at least N hits, by hits in the full data; ties broken by row order
-        _above = np.flatnonzero(row_hits >= _n)
-        _rank = np.empty(len(_above), dtype=int)
-        _rank[np.argsort(row_hits[_above], kind="stable")] = np.arange(len(_above))
+        # terciles of the evaluation rows of each split, by hits in the full data; ties broken by row order.
+        # Built per split from the evaluation rows themselves, so that no group is empty (masks: splits x rows).
+        _tercile = np.full((N_SPLITS, len(row_hits)), -1)
+        for _r in range(N_SPLITS):
+            _ev = np.flatnonzero(_eval[_r])
+            _rank = np.empty(len(_ev), dtype=int)
+            _rank[np.argsort(row_hits[_ev], kind="stable")] = np.arange(len(_ev))
+            _tercile[_r, _ev] = _rank * 3 // max(len(_ev), 1)
         _groups = {}
         for _g, _name in enumerate(["geringe Textmenge", "mittlere Textmenge", "hohe Textmenge"]):
-            _members = _above[_rank * 3 // len(_above) == _g]
-            _m = np.zeros(len(row_hits), dtype=bool)
-            _m[_members] = True
-            _groups[f"{_name} ({row_hits[_members].min()}–{row_hits[_members].max()} Belege)"] = _m
-        _masks = {"alle Bewertungszeilen": np.ones(len(row_hits), dtype=bool), **_groups}
+            _m = _tercile == _g
+            # group bounds vary slightly between splits: median over the splits of the smallest and largest hits
+            _lo = [row_hits[_m[_r]].min() for _r in range(N_SPLITS) if _m[_r].any()]
+            _hi = [row_hits[_m[_r]].max() for _r in range(N_SPLITS) if _m[_r].any()]
+            _bounds = f"{int(np.median(_lo))}–{int(np.median(_hi))} Belege" if _lo else "leer"
+            _groups[f"{_name} ({_bounds})"] = _m
+        _masks = {"alle Bewertungszeilen": np.ones((N_SPLITS, len(row_hits)), dtype=bool), **_groups}
 
-        _change = {_g: {_c: _mean_change(_n, _c, _eval & _m[None, :]) for _c in _crit} for _g, _m in _masks.items()}
+        _change = {_g: {_c: _mean_change(_n, _c, _eval & _m) for _c in _crit} for _g, _m in _masks.items()}
         _verdicts = {_g: {_c: _verdict(_change[_g][_c]) for _c in _crit} for _g in _masks}
         _all_v = [_v for _d in _verdicts.values() for _v in _d.values()]
         if "nicht berechenbar" in _all_v:
@@ -1203,6 +1258,8 @@ def _(mo):
     ### Vorprüfung
 
     Für jedes $k$ wird angegeben, welchen Anteil der Summe der quadrierten PPMI-Werte die Approximation mit Rang $k$ erhält (Anteil an der quadrierten Frobenius-Norm, berechnet auf den vollständigen Daten). Der Wert beschreibt nur die Stärke der Kürzung, nicht ihre Güte. Er ist kein „erklärter Varianzanteil“, weil die PPMI-Matrix nicht zentriert ist.
+
+    **Lesehilfe:** Die Spalte zeigt, wie viel der Matrix nach der Kürzung auf k Dimensionen übrig bleibt (0 bis 100 %). Niedrige Werte sind bei einer dünn besetzten PPMI-Matrix normal und kein Mangel: Die Kürzung soll gerade die vielen kleinen, zufälligen Anteile entfernen. Ob ein k gut ist, zeigen erst die Tabellen 3.1 bis 3.4.
     """)
     return
 
@@ -1287,7 +1344,7 @@ def _(
     mo.vstack([
         show_table(pl.DataFrame({
             "k": [fmt_int(_k) for _k in KP_KS],
-            "erhaltener Anteil": [fmt_pct(_share[min(_k, kp_rank_full) - 1]) for _k in KP_KS],
+            "Anteil der quadrierten Frobenius-Norm": [fmt_pct(_share[min(_k, kp_rank_full) - 1]) for _k in KP_KS],
             "": ["Referenz (emb)" if _k == SVD_K else "" for _k in KP_KS],
         })),
         mo.md(f"Rang der PPMI-Matrix der vollständigen Daten: {fmt_int(kp_rank_full)} (Zeilen: {fmt_int(n_rows)})."),
@@ -1446,6 +1503,15 @@ def _(mo):
     ### Auswertung
 
     **Tabellen 3.1 bis 3.4:** a_zeit, a_wort, Volumeneffekt (mit Vorzeichen; bewertet wird der Betrag) und Einstufung je Kombination (Mittel über die Teilungen, alle Zeilen). **Tabelle 3.5:** Änderung der empfohlenen Kombination gegenüber der Referenz nach Textmenge, mit der Zahl der Teilungen, in denen die Änderung positiv ist.
+
+    **Lesehilfe:**
+
+    - Die Tabellen 3.1 bis 3.4 haben je Zeile ein k und je Spalte ein p. Die Referenz (k und p aus emb) ist in Tabelle 3.4 markiert.
+    - **3.1 a_zeit** und **3.2 a_wort** (Skala 0 bis 1, 0,5 = Zufallserwartung, höher ist besser; Einordnung wie in Abschnitt 1): Die Mittelwerte liegen hier meist niedriger als bei den Prüfzeilen in Abschnitt 1, weil alle Zeilen eingehen, auch die schwach belegten. Unterschiede zwischen benachbarten Zellen betragen oft nur Hundertstel; ob sie belastbar sind, zeigt erst Tabelle 3.4. Typisch ist ein Zielkonflikt: Großes k erhält Unterschiede zwischen Zeitscheiben, verwischt aber die Zielwörter (a_wort sinkt), kleines k umgekehrt.
+    - **3.3 Volumeneffekt** (Korrelation r, Skala −1 bis 1, Ziel 0, bewertet wird der Betrag): Positiv heißt, gut belegte Zeilen sind den übrigen Zeitscheiben ihres Worts allein wegen ihrer Textmenge ähnlicher; negativ heißt, unähnlicher. Übliche Einordnung des Betrags (Cohen 1988): um 0,1 klein, um 0,3 mittel, ab 0,5 groß. Der Wert ist zwischen den Wörtern gepoolt und enthält deshalb auch Unterschiede zwischen häufigen und seltenen Wörtern. Er zeigt, wie stark die Textmenge in den Raum eingeht, aber nicht, wie stark sie die Drift eines einzelnen Worts verfälscht; das misst Abschnitt 4.
+    - **3.4 Einstufung**: Nur „Verbesserung“ (Pareto-Verbesserung gegenüber der Referenz) führt zu einer Empfehlung. „Zielkonflikt“ heißt, die Kombination gewinnt in einem Kennwert und verliert in einem anderen belastbar; dann bleibt die Referenz, und die Pareto-Front im Text darunter zeigt die Kandidaten für eine Abwägung.
+    - **3.5** (nur bei einer Empfehlung): Änderung je Gruppe nach Textmenge. „x von 20“ wie in Abschnitt 2. Zu prüfen ist, ob eine Gruppe, etwa die schwach belegte, verliert, während der Mittelwert steigt.
+    - Der Vergleich **PPMI ohne SVD** im Text zeigt, ob die Kürzung die Unterscheidbarkeit verbessert oder nur erhält.
     """)
     return
 
@@ -1689,6 +1755,7 @@ def _(mo):
 
     - Bullinaria, J. A. & Levy, J. P. (2012): Extracting semantic representations from word co-occurrence statistics: stop-lists, stemming, and SVD. *Behavior Research Methods* 44(3), 890–907.
     - Caron, J. (2001): Experiments with LSA scoring: optimal rank and basis. In: Berry, M. W. (Hg.): *Computational Information Retrieval*. SIAM, 157–169.
+    - Cohen, J. (1988): *Statistical Power Analysis for the Behavioral Sciences*. 2. Aufl. Lawrence Erlbaum.
     - Deerwester, S., Dumais, S. T., Furnas, G. W., Landauer, T. K. & Harshman, R. (1990): Indexing by latent semantic analysis. *Journal of the American Society for Information Science* 41(6), 391–407.
     - Dubossarsky, H., Weinshall, D. & Grossman, E. (2017): Outta control: Laws of semantic change and inherent biases in word representation models. In: *Proceedings of EMNLP 2017*, 1136–1145.
     - Eckart, C. & Young, G. (1936): The approximation of one matrix by another of lower rank. *Psychometrika* 1(3), 211–218.
@@ -1722,7 +1789,7 @@ def _(mo):
 
     **Kennwert: Volumenabhängigkeit.** Für jedes Paar wird die kleinere der beiden Trefferzahlen bestimmt; sie begrenzt die Genauigkeit des Paars. Gemessen wird der Korrelationskoeffizient nach Pearson, r, zwischen der Drift und dem Logarithmus dieser Trefferzahl, und zwar innerhalb der Zielwörter: Von beiden Größen wird je Zielwort der Mittelwert über seine Paare abgezogen, und die Korrelation wird aus diesen Abweichungen über alle Paare berechnet (Korrelation innerhalb von Gruppen, Bland & Altman 1995). r liegt zwischen −1 und 1. Bei 0 hängt die Drift nicht linear von der logarithmierten Trefferzahl ab. Ein negativer Wert bedeutet, dass ein Wort zwischen schwach belegten Zeitscheiben eine größere Drift zeigt als zwischen gut belegten. Die Berechnung innerhalb der Zielwörter schließt aus, dass Unterschiede zwischen häufigen und seltenen Wörtern den Wert bestimmen. Gefragt ist, ob die Trajektorie *eines* Worts von der Belegung seiner Zeitscheiben abhängt. Einbezogen werden Zielwörter mit mindestens zwei Paaren.
 
-    **Unsicherheit.** Die Unsicherheit von r wird mit einem Bootstrap über die Zielwörter geschätzt (Efron & Tibshirani 1993; Ziehen ganzer Gruppen: Davison & Hinkley 1997). Die Zielwörter werden `DRIFT_N_BOOT`-mal mit Zurücklegen neu gezogen, jedes mit allen seinen Paaren, und r wird jedes Mal neu berechnet. Das 95-%-Intervall reicht vom 2,5-%- bis zum 97,5-%-Quantil dieser Werte (Perzentilintervall). Gezogen werden Zielwörter und nicht Paare, weil die Paare desselben Worts nicht unabhängig voneinander sind.
+    **Unsicherheit.** Die Unsicherheit von r wird durch Resampling der Zielwörter mit Zurücklegen geschätzt (in der Literatur *Bootstrap*; Efron & Tibshirani 1993; Ziehen ganzer Gruppen: Davison & Hinkley 1997). Die Zielwörter werden `DRIFT_N_BOOT`-mal mit Zurücklegen neu gezogen, jedes mit allen seinen Paaren, und r wird jedes Mal neu berechnet. Das 95-%-Intervall reicht vom 2,5-%- bis zum 97,5-%-Quantil dieser Werte (Perzentilintervall). Gezogen werden Zielwörter und nicht Paare, weil die Paare desselben Worts nicht unabhängig voneinander sind.
 
     **Verglichene Verfahren.** Alle Varianten werden an denselben Paaren berechnet.
 
@@ -1755,7 +1822,7 @@ def _(mo):
     ### Entscheidungsregel
 
     - **Voraussetzung:** Das 95-%-Intervall von r der Rohdrift schließt 0 aus. Andernfalls wird kein Eingriff empfohlen.
-    - Für jede Variante wird in jeder Bootstrap-Wiederholung der Betrag |r| der Variante minus |r| der Rohdrift berechnet. Liegt das 95-%-Intervall dieser Differenz ganz unter 0, ist die Volumenabhängigkeit **belastbar geringer**, liegt es ganz über 0, **belastbar höher**, sonst gilt **kein belastbarer Unterschied**. Bewertet wird der Betrag, weil auch eine positive Abhängigkeit eine Abhängigkeit von der Textmenge ist (wie in Abschnitt 3).
+    - Für jede Variante wird in jeder Resampling-Wiederholung der Betrag |r| der Variante minus |r| der Rohdrift berechnet. Liegt das 95-%-Intervall dieser Differenz ganz unter 0, ist die Volumenabhängigkeit **belastbar geringer**, liegt es ganz über 0, **belastbar höher**, sonst gilt **kein belastbarer Unterschied**. Bewertet wird der Betrag, weil auch eine positive Abhängigkeit eine Abhängigkeit von der Textmenge ist (wie in Abschnitt 3).
     - Empfohlen wird unter den belastbar geringeren Varianten die mit dem kleinsten |r|. Varianten, deren |r| sich von dem der empfohlenen nicht belastbar unterscheidet (Intervall der Differenz schließt 0 ein), werden als gleichwertig genannt. Zwischen ihnen entscheiden Belegverlust und Umsetzbarkeit, die die Auswertung je Variante angibt.
     - Ist keine Variante belastbar geringer, bleibt es bei der Rohdrift.
     """)
@@ -1768,6 +1835,8 @@ def _(mo):
     ### Vorprüfung
 
     Wie ungleich sind die Trefferzahlen benachbarter Zeitscheiben? Die Tabelle zeigt für alle Paare benachbarter Zeitscheiben desselben Zielworts und für die ausgewerteten Paare das Verhältnis der größeren zur kleineren Trefferzahl (1 = gleich viele Belege).
+
+    **Lesehilfe:** Ein Verhältnis von 2 heißt, die eine Zeile hat doppelt so viele Belege wie die andere. Je ungleicher ein Paar, desto ungleicher ist das Grundrauschen seiner beiden Zeilen, und desto mehr kann die Rohdrift von der Belegung statt vom Sprachgebrauch abhängen. Zu vergleichen sind beide Tabellenzeilen: Die Untergrenze `DRIFT_FLOOR` entfernt vor allem die sehr ungleichen Paare. Die Spalte **Zielwörter** zeigt, für wie viele Wörter überhaupt ausgewertete Paare übrig bleiben.
     """)
     return
 
@@ -2100,6 +2169,33 @@ def _(mo):
     **Tabelle 4.2, Volumenabhängigkeit:** r innerhalb der Zielwörter je Variante mit 95-%-Intervall, die Differenz der Beträge gegenüber der Rohdrift mit 95-%-Intervall und die Einstufung nach der Entscheidungsregel. Die Rangkorrelation nach Spearman (1904) gibt an, wie weit die Variante die Reihenfolge der Paare nach ihrer Drift gegenüber der Rohdrift erhält (1 = gleiche Reihenfolge). Die beiden letzten Zeilen sind Zwischengrößen der Permutationsrechnung und gehen nicht in die Entscheidung ein.
 
     **Tabelle 4.3, Permutationstest:** je Gruppe nach der kleineren Trefferzahl eines Paars (Terzile) der Anteil der Paare mit p < 0,05. Ohne jeden Unterschied zwischen den Zeitscheiben wären etwa 5 % zu erwarten.
+
+    **Lesehilfe Tabelle 4.1 (Sättigungskurve):**
+
+    - Drift ist die Kosinusdistanz 1 − cos: 0 heißt gleiche Richtung, 1 heißt rechtwinklig (kein gemeinsamer Anteil), Werte über 1 kommen nach der SVD kaum vor.
+    - **Drift beobachtet**: der Abstand der beiden Zeitscheiben, gemessen mit h Belegen je Zeile. **Drift ohne Unterschied**: der Abstand zweier Stichproben gleicher Größe aus denselben Belegen, also das Grundrauschen bei h Belegen.
+    - **Verhältnis** nahe 100 %: Die beobachtete Drift ist vom Grundrauschen nicht zu unterscheiden. Je kleiner das Verhältnis, desto mehr gibt die Drift den Unterschied der Zeitscheiben wieder.
+    - Das Verhältnis ist kein Anteil des Rauschens an der Drift: Rauschen und echter Unterschied addieren sich nicht, bei einem echten Unterschied kommt nur ein Teil des Rauschens hinzu.
+    - Zu achten ist auf den Verlauf: Die beobachtete Drift sollte sich mit wachsendem h auf einem Niveau einpendeln (dem echten Unterschied der Zeitscheiben), die Drift ohne Unterschied weiter fallen. Ein Knick, ab dem das Rauschen kaum noch fällt, wäre eine natürliche Schwelle; fehlt er, gibt die Kurve keine Schwelle vor.
+    - Gut ist ein kleines Verhältnis schon bei h\*. Ein großes Verhältnis bei h\* heißt: Eine einzelne Zeile ist dort wiedererkennbar, der Abstand zweier Zeilen aber noch stark vom Grundrauschen bestimmt.
+
+    **Lesehilfe Tabelle 4.2 (Volumenabhängigkeit):**
+
+    - **r** (Skala −1 bis 1, Ziel 0) ist die Korrelation zwischen Drift und log der kleineren Trefferzahl innerhalb der Wörter. Negativ heißt: Ein Wort zeigt zwischen schwach belegten Zeitscheiben mehr Drift als zwischen gut belegten, das ist der erwartete Stichprobeneffekt. Positiv heißt das Umgekehrte. Einordnung des Betrags wie in Abschnitt 3 (Cohen 1988).
+    - **r, 95-%-Intervall**: Schließt es 0 aus, ist die Abhängigkeit belastbar. Schließt es 0 knapp ein, ist sie nicht nachweisbar, aber nicht ausgeschlossen.
+    - **Δ|r|**: Betrag der Variante minus Betrag der Rohdrift. Negativ ist besser. Liegt das Intervall ganz unter 0, ist die Variante „belastbar geringer“.
+    - **Belege verwendet**: der Preis der Variante. Bei gleichwertigen Varianten entscheidet er.
+    - **Rangkorrelation mit Rohdrift** (Spearman, 1 = gleiche Reihenfolge der Paare): Nahe 1 heißt, die Variante entfernt vor allem das Artefakt bei ungleich belegten Paaren und lässt die Rangfolge der übrigen Paare stehen. Ein niedriger Wert ist nicht von selbst schlecht, verlangt aber eine Begründung.
+    - **Drift abzüglich Permutationserwartung**: Kippt r ins Positive, überkorrigiert der Abzug. Grund ist die Nichtadditivität (s. Tabelle 4.1).
+    - Die beiden Zeilen **zur Information** zeigen die Bestandteile der Permutationsrechnung. r der **Permutationserwartung** zeigt, wie stark reines Grundrauschen von der Trefferzahl abhängt; er ist meist stark negativ. Ihre Rangkorrelation zeigt, ob das Rauschniveau eines Paars etwas über seinen Rang in der beobachteten Drift sagt. Liegt r der **Drift mit gemeinsamen Randsummen** viel näher an 0 als r der Permutationserwartung, kommt zu einem echten Unterschied nur ein Teil des Rauschens hinzu.
+    - Das Ergebnis hängt von `DRIFT_FLOOR` ab: Bei einer niedrigeren Untergrenze kann eine andere Variante die beste sein.
+
+    **Lesehilfe Tabelle 4.3 (Permutationstest):**
+
+    - **Anteil p < 0,05**: ohne jeden Unterschied zwischen den Zeitscheiben etwa 5 %. Werte nahe 100 % heißen: Fast alle Paare liegen über der Zufallserwartung.
+    - Über der Zufallserwartung heißt nicht Bedeutungswandel. Benachbarte Zeitscheiben unterscheiden sich fast immer, etwa in Themen, Anlässen und Rednern. Der Test zeigt nur, dass die Drift keine reine Zufallsschwankung ist. Liegt der Anteil nahe 100 %, taugt der p-Wert nicht als Filter für die Paare.
+    - Der kleinste mögliche p-Wert ist 1 / (1 + `DRIFT_N_PERM`). Feinere Unterschiede zwischen deutlichen Paaren zeigt der Test nicht.
+    - **Drift mit gemeinsamen Randsummen** gegen **Permutationserwartung**: Der Abstand der beiden Spalten zeigt, wie weit die beobachtete Drift über dem Grundrauschen liegt. Die Permutationserwartung sollte mit der Textmenge fallen.
     """)
     return
 
@@ -2265,7 +2361,7 @@ def _(
     _text = [
         f"Ausgewertet: {fmt_int(_use.sum())} Paare aus {fmt_int(_nw)} Zielwörtern (beide Zeilen mindestens "
         f"{DRIFT_FLOOR} Belege, mindestens zwei Paare je Zielwort). SVD mit k = {SVD_K}, p = {SVD_P:g}; "
-        f"{DRIFT_N_DRAWS} Ziehungen, {DRIFT_N_PERM} Permutationen, {DRIFT_N_BOOT} Bootstrap-Wiederholungen.",
+        f"{DRIFT_N_DRAWS} Ziehungen, {DRIFT_N_PERM} Permutationen, {DRIFT_N_BOOT} Resampling-Wiederholungen (mit Zurücklegen).",
         f"Sättigungskurve ({fmt_int(drift_probe_n)} Prüfpaare): Bei {H_GRID[0]} Beleg(en) je Zeile beträgt die Drift "
         f"ohne Unterschied {fmt_pct(_share[0]) if np.isfinite(_share[0]) else '–'} der beobachteten, bei {H_MAX} "
         f"Belegen {fmt_pct(_share[-2]) if np.isfinite(_share[-2]) else '–'}, mit allen Belegen "
@@ -2356,6 +2452,7 @@ def _(mo):
     ### Literatur
 
     - Bland, J. M. & Altman, D. G. (1995): Calculating correlation coefficients with repeated observations: Part 1 – correlation within subjects. *BMJ* 310(6977), 446.
+    - Cohen, J. (1988): *Statistical Power Analysis for the Behavioral Sciences*. 2. Aufl. Lawrence Erlbaum.
     - Davison, A. C. & Hinkley, D. V. (1997): *Bootstrap Methods and their Application*. Cambridge University Press.
     - Dubossarsky, H., Weinshall, D. & Grossman, E. (2017): Outta control: Laws of semantic change and inherent biases in word representation models. In: *Proceedings of EMNLP 2017*, 1136–1145.
     - Efron, B. & Tibshirani, R. J. (1993): *An Introduction to the Bootstrap*. Chapman & Hall.

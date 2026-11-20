@@ -17,6 +17,18 @@ Jede Stufe liest aus `output/` der vorherigen. `*_diagnose.py` und
 `*_demo.py` sind begleitende Notebooks zur Prüfung von Verfahrensentscheidungen.
 Die Korpusdatei (`stages/01_preprocessing/input/`) ist nicht im Repo.
 
+## Weitere Dokumentation
+
+Im Ordner [`readme/`](readme/):
+
+| Datei | Inhalt |
+|---|---|
+| `Readme Scientific Methodology.md` | methodische Entscheidungen, Messreihen, Literatur |
+| `Readme Frequency Control.md` | Kontrolle der Trefferzahl: Befunde der Diagnose und Folgerungen |
+| `Readme Glossary.md` | Begriffe mit englischen Fachtermini |
+| `Readme Datenmodell.md` | Datenmodell |
+| `Readme Pipeline.md` | Entstehungsgeschichte der Pipeline (überwiegend historisch) |
+
 ## Notebooks starten
 
 ```bash

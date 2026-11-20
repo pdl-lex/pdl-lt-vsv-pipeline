@@ -1,0 +1,49 @@
+{
+  "label": "",
+  "timestamp": "2026-11-20T13:52:01",
+  "data_version": 1,
+  "system": {
+    "host": "framework",
+    "os": "Linux-7.3.4-300.fc45.x86_64-x86_64-with-glibc2.44",
+    "python": "3.13.12",
+    "cpu": "AMD RYZEN AI MAX+ 395 w/ Radeon 8060S",
+    "logical_cpus": 32,
+    "ram_gb": 125.1,
+    "torch": "2.14.1+cu130",
+    "torch_threads": 16,
+    "gpu": null,
+    "blas": "scipy-openblas",
+    "polars_threads": 32
+  },
+  "times_s": {
+    "kwic_window": 16.21,
+    "kwic_punkt": 33.42,
+    "stanza_load": 1.49,
+    "lemmatize": 100.78,
+    "ppmi": 0.49,
+    "svd": 12.66
+  },
+  "total_s": 165.74,
+  "rates": {
+    "kwic_window_mb_s": 9.8,
+    "kwic_punkt_mb_s": 4.75,
+    "satzgrenzen_s": 17.21,
+    "lemma_hits_s": 119.1
+  },
+  "details": {
+    "kwic_docs": 39094,
+    "kwic_window_hits": 345176,
+    "kwic_punkt_hits": 345176,
+    "lemma_hits": 12000,
+    "matrix_shape": [
+      12280,
+      120882
+    ],
+    "matrix_nnz": 3086040,
+    "svd_s0": 1204.8203381372045
+  },
+  "projection_bundestag_min": {
+    "kwic_punkt": 1.1,
+    "lemmatize": 96.9
+  }
+}

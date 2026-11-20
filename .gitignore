@@ -17,3 +17,6 @@ stages/*/output/
 !stages/01_preprocessing/input/facet_values_*.csv
 !stages/03_postprocessing/input/anchors.csv
 !stages/03_postprocessing/input/stopwords.txt
+
+# Speedtest: Korpusauszug zu groß für GitHub (>100 MB), wird per --prepare erzeugt
+scripts/speedtest/data/corpus.csv

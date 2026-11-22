@@ -354,27 +354,6 @@ def _(mo):
     return
 
 
-@app.cell(disabled=True)
-def _():
-    # data type is an immutable set, which is faster to process than a list
-
-    # alternate larger set
-    # target_forms = {"Bundeswehr", "Wehrpflicht", "Verteidigung", "Landesverteidigung", "Drohne", "Drohnen", "Hindukusch", "Rüstung", "Rüstungsindustrie", "Sicherheit", "Frieden", "Friedenssicherung"}
-
-    #target_forms = {
-        #"Bundeswehr",
-        # "Wehrpflicht",
-        # "Verteidigung",
-        # "Rüstung",
-        # "Sicherheit",
-        # "Militär",
-        # "Drohne",
-        # "Aggressor",
-
-    #}
-    return
-
-
 @app.cell
 def _(normalize_chars, re):
     # target word list: form -> lemma (input/target_forms.csv, built by build_target_forms.py)
@@ -752,6 +731,32 @@ def write_kwic_hits(rows, extract, out_path, batch_size=100_000, facet_names=())
     return n_docs, n_hits
 
 
+@app.function
+def shuffle_kwic_text(kwic_hits, columns=("context_before", "context_after"), seed=42):
+    """
+    Shuffle the word order within the text contexts of the KWIC hits; lazy in, lazy out.
+
+    Each column is shuffled separately (words stay in context_before or context_after), only
+    within one row, never across rows. Words are the whitespace-separated tokens, punctuation
+    stays attached to its word; the shuffled words are joined with single spaces.
+    Reproducible for a given seed.
+    """
+    import polars as pl
+
+    M = 1 << 20  # larger than any context length
+    start = pl.col("_row").cast(pl.Int64) * M
+    lf = kwic_hits.with_row_index("_row")
+    for i, c in enumerate(columns):
+        words = pl.col(c).str.extract_all(r"\S+")
+        # permutation per row: indices sorted by a seeded hash, offset by row * M so rows of the
+        # same length get different permutations; one seed per column
+        perm = pl.int_ranges(start, start + words.list.len()).list.eval(
+            pl.element().sort_by(pl.element().hash(seed=seed + i)) % M
+        )
+        lf = lf.with_columns(words.list.gather(perm).list.join(" ").alias(c))
+    return lf.drop("_row")
+
+
 @app.cell
 def _(
     Path,
@@ -805,6 +810,14 @@ def _(
         )
 
     print(f"{_n_docs:,} Dokumente, {_n_hits:,} Treffer, gespeichert: {_out}")
+
+    # same file with the word order shuffled within context_before and context_after (separately)
+    _out_shuffled = out_dir / f"kwic_hits_{run_id}_shuffled.csv"
+    _tmp = _out_shuffled.with_name(_out_shuffled.name + ".part")
+    shuffle_kwic_text(pl.scan_csv(_out, null_values="NA", infer_schema=False)).sink_csv(_tmp)
+    _tmp.replace(_out_shuffled)
+    print(f"Gespeichert: {_out_shuffled}")
+
     pl.read_csv(_out, n_rows=100, null_values="NA")
     return
 
@@ -1675,6 +1688,47 @@ def _(
     return (kwic_hits_sliced,)
 
 
+@app.function
+def shuffle_contexts(kwic_hits, columns=("context_lemmas", "context_pos_tags", "context_gender"), seed=42):
+    """
+    Shuffle the word order within each context; lazy in, lazy out.
+
+    Only the words of one row are permuted, never across rows. The parallel list columns
+    (lemmas, POS tags, genders) get the same permutation, so they stay aligned. Columns that
+    are missing (context_gender with spaCy) are skipped. Reproducible for a given seed.
+    """
+    import polars as pl
+
+    names = kwic_hits.collect_schema().names()
+    cols = [c for c in columns if c in names]
+    # permutation per row: indices 0..n-1 sorted by a seeded hash; the indices are offset by
+    # row * M before hashing, so rows of the same length get different permutations
+    M = 1 << 20  # larger than any context length
+    start = pl.col("_row").cast(pl.Int64) * M
+    perm = pl.int_ranges(start, start + pl.col(cols[0]).list.len()).list.eval(
+        pl.element().sort_by(pl.element().hash(seed=seed)) % M
+    )
+    return (
+        kwic_hits.with_row_index("_row")
+        .with_columns(perm.alias("_perm"))
+        .with_columns(pl.col(c).list.gather(pl.col("_perm")) for c in cols)
+        .drop("_row", "_perm")
+    )
+
+
+@app.cell
+def _(kwic_hits_sliced, out_dir, pl, run_id, slice_grid_picker):
+    # same file as above, but with the word order shuffled within each context (control
+    # condition for order-sensitive methods); counts based on bags of words are unaffected
+    _path = out_dir / f"kwic_hits_sliced_{run_id}_{slice_grid_picker.value}_shuffled.parquet"
+    _tmp = _path.with_name(_path.stem + ".tmp.parquet")
+    shuffle_contexts(kwic_hits_sliced).sink_parquet(_tmp)
+    _tmp.replace(_path)
+
+    pl.read_parquet(_path, n_rows=100)
+    return
+
+
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
@@ -1853,9 +1907,11 @@ def _(mo):
 
     * output/speaker_names_[projekt].csv: Extrahierte Redner-Namen, für spätere Filter-Vorbereitung. Bei Korpora ohne Redner (Zeitschriften) nur die Kopfzeile.
     * kwic_hits_[projekt]_[kwic_variant].csv: Treffer pro Zielwort, mit Kontext vor, Kontext nach, Zielwort, Datum und Facettenwerten (facet_1, …) des Dokuments. Ohne Facettenspalten bricht das Slicing ab: Extraktion neu starten.
+    * kwic_hits_[projekt]_[kwic_variant]_shuffled.csv: Dieselbe Datei, aber die Wörter innerhalb von Kontext vor und Kontext nach jeweils getrennt zufällig vertauscht (fester Seed). Zwischen den Treffern wird nichts vertauscht.
     * kwic_hits_lemmatized_stanza_[projekt]_[kwic_variant].parquet: Lemmatisierte Version der KWIC-Treffer. Standardmäßg wird Stanza für die Lemmatisierung verwendet. Code für spaCy ist enthalten, aber deaktiviert.
     * feminine_base_map_[projekt]_[kwic_variant].csv: Zuordnung der movierten Feminina zur Grundform, zur Prüfung.
     * kwic_hits_sliced_[projekt]_[kwic_variant]_[slice_grid].parquet: Die lemmatisierten Treffer mit Zeitscheibe.
+    * kwic_hits_sliced_[projekt]_[kwic_variant]_[slice_grid]_shuffled.parquet: Dieselbe Datei, aber die Wortfolge innerhalb jedes Kontexts zufällig vertauscht (Lemmata, POS-Tags und Genus parallel, fester Seed). Zwischen den Treffern wird nichts vertauscht.
     * cooc_counts_[projekt]_[kwic_variant]_[slice_grid].csv: Kookkurenzen für Slice x Zielwort x Kontextwort.
     * cooc_counts_facets_[projekt]_[kwic_variant]_[slice_grid].parquet: dieselben Kookkurrenzen, zusätzlich aufgeteilt nach Facettenwert (Spalten facet_1, …). Nur bei Korpora mit Facetten.
     * corpus_meta_[projekt]_[kwic_variant]_[slice_grid].json: Projekt (ID, Name, Quelle), Laufparameter und Deklaration der Facetten für das Bundle (Spalte, ID, Bezeichnung, Werte mit Trefferzahl, Ersatzwert für fehlende Angaben). Leere Facettenliste = Korpus ohne Facetten.

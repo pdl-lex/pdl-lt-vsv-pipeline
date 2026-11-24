@@ -765,6 +765,14 @@ def shuffle_kwic_text(kwic_hits, columns=("context_before", "context_after"), se
 
 
 @app.cell
+def _(mo):
+    # counter that is increased after every finished extraction; the load cell reads it
+    # and is therefore run again by marimo when the file has been rewritten
+    get_kwic_version, set_kwic_version = mo.state(0)
+    return get_kwic_version, set_kwic_version
+
+
+@app.cell
 def _(
     Path,
     bundle_facets,
@@ -777,6 +785,7 @@ def _(
     pl,
     run,
     run_id,
+    set_kwic_version,
     source_columns,
 ):
     # this cell only runs when the "Extraktion starten" button above is hit
@@ -827,6 +836,9 @@ def _(
     _tmp.replace(_out_shuffled)
     print(f"Gespeichert: {_out_shuffled}")
 
+    # file is complete: let the load cell read it again
+    set_kwic_version(lambda v: v + 1)
+
     pl.read_csv(_out, n_rows=100, null_values="NA")
     return
 
@@ -844,11 +856,12 @@ def _(out_dir, run_id):
 
 
 @app.cell
-def _(out_dir, pl, run_id):
+def _(get_kwic_version, out_dir, pl, run_id):
     # Read pre-generated list (written by the extraction above, or by an earlier run)
     # default modes are "punkt", "somajo" and "window20"
     # Use control above to switch
-
+    # run again automatically after every extraction (via get_kwic_version)
+    get_kwic_version()
     kwic_hits = pl.read_csv(out_dir / f"kwic_hits_{run_id}.csv", null_values="NA")
     print(f"Geladen: kwic_hits_{run_id}.csv")
     kwic_hits

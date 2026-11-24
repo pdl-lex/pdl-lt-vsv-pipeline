@@ -692,7 +692,7 @@ def read_corpus_rows(files, id_col, date_col, text_col, on_progress=None, normal
 
 
 @app.function
-def write_kwic_hits(rows, extract, out_path, batch_size=100_000, facet_names=()):
+def write_kwic_hits(rows, extract, out_path, batch_size=100_000, facet_names=(), n_jobs=1, docs_per_task=200):
     """
     Run the KWIC extraction over (id, date, text, facets) rows and write all hits to one CSV file.
 
@@ -702,22 +702,29 @@ def write_kwic_hits(rows, extract, out_path, batch_size=100_000, facet_names=())
     The file is first written as *.part and renamed when complete, so an aborted run leaves no
     truncated CSV under the final name. Returns (number of documents, number of hits).
     """
+    from itertools import batched
     from pathlib import Path
 
     import polars as pl
+    from joblib import Parallel, delayed
+
+    def chunk_hits(chunk):  # runs in a worker process, one package of documents
+        hits = []
+        for doc_id, date, text, facets in chunk:
+            for hit in extract(doc_id, text) if text else []:
+                hit["date"] = date
+                hit.update(zip(facet_names, facets))
+                hits.append(hit)
+        return len(chunk), hits
 
     out_path = Path(out_path)
     part_path = out_path.with_name(out_path.name + ".part")
     n_docs, n_hits, hits, header = 0, 0, [], True
     with part_path.open("wb") as fh:
-        for doc_id, date, text, facets in rows:
-            n_docs += 1
-            if not text:
-                continue
-            for hit in extract(doc_id, text):
-                hit["date"] = date
-                hit.update(zip(facet_names, facets))
-                hits.append(hit)
+        jobs = (delayed(chunk_hits)(chunk) for chunk in batched(rows, docs_per_task))
+        for n, chunk in Parallel(n_jobs=n_jobs, return_as="generator")(jobs):  # results in input order
+            n_docs += n
+            hits.extend(chunk)
             if len(hits) >= batch_size:
                 pl.DataFrame(hits).write_csv(fh, include_header=header)
                 n_hits, hits, header = n_hits + len(hits), [], False
@@ -797,16 +804,18 @@ def _(
             source_columns["date"],
             source_columns["text"],
             on_progress=_progress,
-            # soft hyphens, non-breaking hyphens, invisible characters etc.; the Bundestag CSV
-            # does not pass through pipeline_pre_dataimport.py, so the same step is applied here
-            normalize=normalize_chars,
             # facet values of the document (e.g. parliamentary group, publication), written with every hit
             facet_cols=[_f["source"] for _f in bundle_facets],
         )
         # same file as read below (kwic_variant includes the window size); the cell below has to be
         # run again afterwards, it does not depend on this one
         _n_docs, _n_hits = write_kwic_hits(
-            _rows, kwic_extract, _out, facet_names=[_f["column"] for _f in bundle_facets]
+            _rows,
+            lambda _d, _t: kwic_extract(_d, normalize_chars(_t)),  # normalization now in the workers
+            _out,
+            facet_names=[_f["column"] for _f in bundle_facets],
+            n_jobs=8,
+            docs_per_task=10,
         )
 
     print(f"{_n_docs:,} Dokumente, {_n_hits:,} Treffer, gespeichert: {_out}")
@@ -1724,6 +1733,18 @@ def _(kwic_hits_sliced, out_dir, pl, run_id, slice_grid_picker):
     _tmp = _path.with_name(_path.stem + ".tmp.parquet")
     shuffle_contexts(kwic_hits_sliced).sink_parquet(_tmp)
     _tmp.replace(_path)
+
+    # plain CSV copy for viewing: list columns joined with single spaces
+    _csv = _path.with_suffix(".csv")
+    _csv_tmp = _csv.with_name(_csv.stem + ".tmp.csv")
+    (
+        pl.scan_parquet(_path)
+        .drop(["target_form", "position", "context_before", "context_after", "sentence_based"])
+        .with_columns(pl.col(pl.List(pl.String)).list.join(" "))
+        .sink_csv(_csv_tmp)
+    )
+    _csv_tmp.replace(_csv)
+
 
     pl.read_parquet(_path, n_rows=100)
     return

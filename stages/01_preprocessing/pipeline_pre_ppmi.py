@@ -91,7 +91,9 @@ def _():
 
         _tmp = assets_dir / "_tmp_nltk"
         _shutil.rmtree(_tmp, ignore_errors=True)
-        _nltk.download("punkt_tab", download_dir=str(_tmp), quiet=True, raise_on_error=True)
+        _nltk.download(
+            "punkt_tab", download_dir=str(_tmp), quiet=True, raise_on_error=True
+        )
         _punkt.mkdir(parents=True, exist_ok=True)
         for _name in ("german", "english", "README"):
             _shutil.rmtree(_punkt / _name, ignore_errors=True)
@@ -129,7 +131,7 @@ def _():
         _shutil.rmtree(_tmp, ignore_errors=True)
         for _m in _whl.infolist():
             if _m.filename.startswith(_prefix) and not _m.is_dir():
-                _target = _tmp / _m.filename[len(_prefix):]
+                _target = _tmp / _m.filename[len(_prefix) :]
                 _target.parent.mkdir(parents=True, exist_ok=True)
                 _target.write_bytes(_whl.read(_m))
         _spacy_dir.parent.mkdir(parents=True, exist_ok=True)
@@ -188,7 +190,14 @@ def _(Path, pl, project_picker, re):
         corpus_files = ["input/CPP-BT_2026-01-17_DE_CSV_Reden_Gesamt.csv"]
         source_columns = {"id": "rede_id", "date": "sitzung_datum", "text": "rede_text"}
         speaker_facet = "facet_2"
-        bundle_facets = [{"column": "facet_1", "source": "redner_fraktion", "id": "fraktion", "label": "Fraktion"}]
+        bundle_facets = [
+            {
+                "column": "facet_1",
+                "source": "redner_fraktion",
+                "id": "fraktion",
+                "label": "Fraktion",
+            }
+        ]
 
         def prepare_corpus(lf):
             # define colums of interest from original CSV
@@ -237,7 +246,14 @@ def _(Path, pl, project_picker, re):
         )
         source_columns = {"id": None, "date": "date", "text": "text"}
         speaker_facet = None
-        bundle_facets = [{"column": "facet_1", "source": "facet_1", "id": "publication", "label": "Publikation"}]
+        bundle_facets = [
+            {
+                "column": "facet_1",
+                "source": "facet_1",
+                "id": "publication",
+                "label": "Publikation",
+            }
+        ]
 
         def prepare_corpus(lf):
             return lf.select("date", "text", "facet_1")
@@ -246,16 +262,22 @@ def _(Path, pl, project_picker, re):
         raise ValueError(f"Projekt {project!r} ist nicht definiert")
 
     # the ID goes into file names: letters, digits, "-" only ("_" separates the parts of a file name)
-    assert re.fullmatch(r"[a-z0-9-]+", project), f"Projekt-ID {project!r}: nur a-z, 0-9 und -"
+    assert re.fullmatch(r"[a-z0-9-]+", project), (
+        f"Projekt-ID {project!r}: nur a-z, 0-9 und -"
+    )
     assert corpus_files and all(Path(_f).is_file() for _f in corpus_files), (
         f"Korpusdateien nicht gefunden: {corpus_files or 'keine'}"
     )
     # column names in the hits; facet columns must not collide with the columns of the hits
     facet_columns = [_f["column"] for _f in bundle_facets]
-    assert len(set(facet_columns)) == len(facet_columns) and all(_c.startswith("facet_") for _c in facet_columns)
+    assert len(set(facet_columns)) == len(facet_columns) and all(
+        _c.startswith("facet_") for _c in facet_columns
+    )
     print(f"Projekt {project}: {project_meta['name']}")
     print(f"{len(corpus_files)} Korpusdatei(en): {', '.join(corpus_files)}")
-    print(f"Facetten im Bundle: {', '.join(f'{_f['label']} ({_f['column']})' for _f in bundle_facets) or 'keine'}")
+    print(
+        f"Facetten im Bundle: {', '.join(f'{_f["label"]} ({_f["column"]})' for _f in bundle_facets) or 'keine'}"
+    )
     return (
         MISSING_FACET_VALUE,
         bundle_facets,
@@ -295,8 +317,12 @@ def _(corpus, pl, source_columns):
     # only ids from the source can be duplicated, generated ones are unique by construction
     # note: this reads the whole source file with polars (see above), fine for the Bundestag data
     if source_columns["id"] is not None:
-        _ids = corpus.select(pl.len().alias("rows"), pl.col("id").n_unique().alias("unique")).collect()
-        assert _ids["unique"][0] == _ids["rows"][0], "Werte in 'id' sind nicht eindeutig"
+        _ids = corpus.select(
+            pl.len().alias("rows"), pl.col("id").n_unique().alias("unique")
+        ).collect()
+        assert _ids["unique"][0] == _ids["rows"][0], (
+            "Werte in 'id' sind nicht eindeutig"
+        )
     return
 
 
@@ -310,7 +336,7 @@ def _(mo):
 
 
 @app.cell
-def _(corpus, pl, project, speaker_facet):
+def _(corpus, out_dir, pl, project, speaker_facet):
     # speaker names as an exact list of real persons in the corpus (more precise than NER, no extra NLP run)
     # the speaker facet has the form "Nachname_Vorname"; multi-part names ("von der Leyen") are split into single
     # tokens, because lemmas are single tokens as well
@@ -322,8 +348,7 @@ def _(corpus, pl, project, speaker_facet):
         speaker_names = pl.DataFrame(schema={"name": pl.Utf8})
     else:
         speaker_names = (
-            corpus
-            .select(pl.col(speaker_facet).str.split("_").alias("name"))
+            corpus.select(pl.col(speaker_facet).str.split("_").alias("name"))
             .explode("name", empty_as_null=True)
             .select(pl.col("name").str.split(" "))
             .explode("name", empty_as_null=True)
@@ -335,7 +360,7 @@ def _(corpus, pl, project, speaker_facet):
         )
 
     # per project, independent of the KWIC variant
-    speaker_names_path = f"output/speaker_names_{project}.csv"
+    speaker_names_path = f"{out_dir}/speaker_names_{project}.csv"
     speaker_names.write_csv(speaker_names_path)
     print(f"{len(speaker_names):,} Namensbestandteile gespeichert")
     return (speaker_names_path,)
@@ -368,7 +393,9 @@ def _(normalize_chars, re):
             _lemma = normalize_chars(_row["lemma"].strip())
             if not _form:
                 continue
-            assert not re.search(r"\s", _form), f"Zielwort-Form ist kein einzelnes Token: {_form!r}"
+            assert not re.search(r"\s", _form), (
+                f"Zielwort-Form ist kein einzelnes Token: {_form!r}"
+            )
             assert target_form_lemmas.get(_form, _lemma) == _lemma, (
                 f"Form {_form!r} hat zwei Lemmata: {target_form_lemmas[_form]!r}, {_lemma!r}"
             )
@@ -376,7 +403,9 @@ def _(normalize_chars, re):
 
     # data type is an immutable set, which is faster to process than a list
     target_forms = frozenset(target_form_lemmas)
-    print(f"{len(target_forms):,} Formen, {len(set(target_form_lemmas.values())):,} Zielwort-Lemmata")
+    print(
+        f"{len(target_forms):,} Formen, {len(set(target_form_lemmas.values())):,} Zielwort-Lemmata"
+    )
     return target_form_lemmas, target_forms
 
 
@@ -511,7 +540,9 @@ def _(assets_dir, re, strip_punctuation, target_forms):
     from bisect import bisect_left, bisect_right
 
     TOKEN = re.compile(r"\S+")  # token = any sequence of non-whitespace characters
-    collapse_whitespace = lambda s: re.sub(r"\s+", " ", s).strip()  # whitespace normalization
+    collapse_whitespace = lambda s: re.sub(
+        r"\s+", " ", s
+    ).strip()  # whitespace normalization
 
     # both following functions return start and end positions of detected sentences
     def punkt_spans(snip):
@@ -566,13 +597,19 @@ def _(assets_dir, re, strip_punctuation, target_forms):
         -----
         Requires the globals `target_forms` (set of target words) and `strip_punctuation()`.
         """
-        toks = [m.span() for m in TOKEN.finditer(text)]  # (start, end) of all whitespace tokens
+        toks = [
+            m.span() for m in TOKEN.finditer(text)
+        ]  # (start, end) of all whitespace tokens
         starts = [s for s, _ in toks]
         ends = [e for _, e in toks]
         hits = []
-        for i, (hs, he) in enumerate(toks):  # i = token index, hs/he = start/end of the token
+        for i, (hs, he) in enumerate(
+            toks
+        ):  # i = token index, hs/he = start/end of the token
             word = strip_punctuation(text[hs:he])  # remove punctuation at the edges
-            if word not in target_forms:  # check if found word is one of the target forms
+            if (
+                word not in target_forms
+            ):  # check if found word is one of the target forms
                 continue
             lo, hi = (
                 max(0, hs - pad),
@@ -594,15 +631,23 @@ def _(assets_dir, re, strip_punctuation, target_forms):
                         b = lo + e
                     break
             # whole tokens inside [a, b], at most max_words on each side of the hit
-            j0 = max(bisect_left(starts, a), i - max_words)  # first context token before the hit
-            j1 = min(bisect_right(ends, b) - 1, i + max_words)  # last context token after the hit
+            j0 = max(
+                bisect_left(starts, a), i - max_words
+            )  # first context token before the hit
+            j1 = min(
+                bisect_right(ends, b) - 1, i + max_words
+            )  # last context token after the hit
             hits.append(
                 {
                     "id": doc_id,
                     "target_form": word,
                     "position": i,
-                    "context_before": collapse_whitespace(text[starts[j0]:hs]) if j0 < i else "",
-                    "context_after": collapse_whitespace(text[he:ends[j1]]) if j1 > i else "",
+                    "context_before": collapse_whitespace(text[starts[j0] : hs])
+                    if j0 < i
+                    else "",
+                    "context_after": collapse_whitespace(text[he : ends[j1]])
+                    if j1 > i
+                    else "",
                     "sentence_based": sentence_based,
                 }
             )
@@ -632,16 +677,24 @@ def _(
 ):
     # extraction function as determined with radio buttons above
     if kwic_mode.value == "punkt":
-        kwic_extract = lambda doc_id, text: kwic_sentence(doc_id, text, spans=punkt_spans)
+        kwic_extract = lambda doc_id, text: kwic_sentence(
+            doc_id, text, spans=punkt_spans
+        )
     elif kwic_mode.value == "somajo":
-        kwic_extract = lambda doc_id, text: kwic_sentence(doc_id, text, spans=somajo_spans)
+        kwic_extract = lambda doc_id, text: kwic_sentence(
+            doc_id, text, spans=somajo_spans
+        )
     else:
-        kwic_extract = lambda doc_id, text: kwic_window(doc_id, text, window=window_size.value)
+        kwic_extract = lambda doc_id, text: kwic_window(
+            doc_id, text, window=window_size.value
+        )
     return (kwic_extract,)
 
 
 @app.function
-def read_corpus_rows(files, id_col, date_col, text_col, on_progress=None, normalize=None, facet_cols=()):
+def read_corpus_rows(
+    files, id_col, date_col, text_col, on_progress=None, normalize=None, facet_cols=()
+):
     """
     Yield (id, date, text, facets) for every row of the corpus CSV files, one row at a time.
 
@@ -661,7 +714,9 @@ def read_corpus_rows(files, id_col, date_col, text_col, on_progress=None, normal
     import csv
     import io
 
-    csv.field_size_limit(2**31 - 1)  # texts of whole editions exceed the default limit of 128 KB
+    csv.field_size_limit(
+        2**31 - 1
+    )  # texts of whole editions exceed the default limit of 128 KB
     missing = {"", "NA"}
     next_id = 1
     for path in files:
@@ -692,7 +747,15 @@ def read_corpus_rows(files, id_col, date_col, text_col, on_progress=None, normal
 
 
 @app.function
-def write_kwic_hits(rows, extract, out_path, batch_size=100_000, facet_names=(), n_jobs=1, docs_per_task=200):
+def write_kwic_hits(
+    rows,
+    extract,
+    out_path,
+    batch_size=100_000,
+    facet_names=(),
+    n_jobs=1,
+    docs_per_task=200,
+):
     """
     Run the KWIC extraction over (id, date, text, facets) rows and write all hits to one CSV file.
 
@@ -722,7 +785,9 @@ def write_kwic_hits(rows, extract, out_path, batch_size=100_000, facet_names=(),
     n_docs, n_hits, hits, header = 0, 0, [], True
     with part_path.open("wb") as fh:
         jobs = (delayed(chunk_hits)(chunk) for chunk in batched(rows, docs_per_task))
-        for n, chunk in Parallel(n_jobs=n_jobs, return_as="generator")(jobs):  # results in input order
+        for n, chunk in Parallel(n_jobs=n_jobs, return_as="generator")(
+            jobs
+        ):  # results in input order
             n_docs += n
             hits.extend(chunk)
             if len(hits) >= batch_size:
@@ -732,7 +797,15 @@ def write_kwic_hits(rows, extract, out_path, batch_size=100_000, facet_names=(),
             pl.DataFrame(hits).write_csv(fh, include_header=header)
             n_hits, header = n_hits + len(hits), False
         if header:  # no hits at all: header only
-            columns = ["id", "target_form", "position", "context_before", "context_after", "sentence_based", "date"]
+            columns = [
+                "id",
+                "target_form",
+                "position",
+                "context_before",
+                "context_after",
+                "sentence_based",
+                "date",
+            ]
             fh.write((",".join([*columns, *facet_names]) + "\n").encode("utf-8"))
     part_path.replace(out_path)
     return n_docs, n_hits
@@ -797,7 +870,9 @@ def _(
     # (write_kwic_hits); the progress bar counts megabytes of the corpus files
     _total_mb = sum(Path(_f).stat().st_size for _f in corpus_files) // 1_000_000 + 1
     _out = out_dir / f"kwic_hits_{run_id}.csv"
-    with mo.status.progress_bar(total=_total_mb, title=f"KWIC-Extraktion ({kwic_variant}), MB") as _bar:
+    with mo.status.progress_bar(
+        total=_total_mb, title=f"KWIC-Extraktion ({kwic_variant}), MB"
+    ) as _bar:
         _read = {"bytes": 0, "mb": 0}
 
         def _progress(n_bytes):
@@ -820,7 +895,9 @@ def _(
         # run again afterwards, it does not depend on this one
         _n_docs, _n_hits = write_kwic_hits(
             _rows,
-            lambda _d, _t: kwic_extract(_d, normalize_chars(_t)),  # normalization now in the workers
+            lambda _d, _t: kwic_extract(
+                _d, normalize_chars(_t)
+            ),  # normalization now in the workers
             _out,
             facet_names=[_f["column"] for _f in bundle_facets],
             n_jobs=8,
@@ -832,7 +909,9 @@ def _(
     # same file with the word order shuffled within context_before and context_after (separately)
     _out_shuffled = out_dir / f"kwic_hits_{run_id}_shuffled.csv"
     _tmp = _out_shuffled.with_name(_out_shuffled.name + ".part")
-    shuffle_kwic_text(pl.scan_csv(_out, null_values="NA", infer_schema=False)).sink_csv(_tmp)
+    shuffle_kwic_text(pl.scan_csv(_out, null_values="NA", infer_schema=False)).sink_csv(
+        _tmp
+    )
     _tmp.replace(_out_shuffled)
     print(f"Gespeichert: {_out_shuffled}")
 
@@ -851,7 +930,9 @@ def _(kwic_control_mode, kwic_mode):
 
 @app.cell
 def _(out_dir, run_id):
-    print(f"Will load the following pregenerated list: '{out_dir}/kwic_hits_{run_id}.csv'")
+    print(
+        f"Will load the following pregenerated list: '{out_dir}/kwic_hits_{run_id}.csv'"
+    )
     return
 
 
@@ -941,7 +1022,9 @@ def _(kwic_hits, mo, nlp, out_dir, pl, run_id, target_lemma_map_spacy):
     )
 
     # store results as parquet file
-    kwic_hits_lemmatized_spacy.write_parquet(out_dir / f"kwic_hits_lemmatized_spacy_{run_id}.parquet")
+    kwic_hits_lemmatized_spacy.write_parquet(
+        out_dir / f"kwic_hits_lemmatized_spacy_{run_id}.parquet"
+    )
 
     kwic_hits_lemmatized_spacy
     return
@@ -969,8 +1052,12 @@ def _(assets_dir, target_form_lemmas, target_forms):
             logging_level="WARN",
         )
         _words = sorted(target_forms)
-        _doc = nlp_st([[_w] for _w in _words])  # every word = one "sentence" of one token
-        target_lemma_map = dict(zip(_words, (_s.words[0].lemma for _s in _doc.sentences)))
+        _doc = nlp_st(
+            [[_w] for _w in _words]
+        )  # every word = one "sentence" of one token
+        target_lemma_map = dict(
+            zip(_words, (_s.words[0].lemma for _s in _doc.sentences))
+        )
     else:
         target_lemma_map = dict(target_form_lemmas)
     return stanza, target_lemma_map
@@ -1045,7 +1132,9 @@ def make_context_mapper(form_lemmas, gender_rule=True):
 
 
 @app.function
-def lemmatize_batch(batch, nlp, target_lemma_map, context_mapper=None, chunk=500, on_progress=None):
+def lemmatize_batch(
+    batch, nlp, target_lemma_map, context_mapper=None, chunk=500, on_progress=None
+):
     """
     Lemmatize the contexts of a batch of KWIC hits with Stanza; returns the batch with
     the columns target_lemma, context_lemmas, context_pos_tags and context_gender added
@@ -1075,13 +1164,22 @@ def lemmatize_batch(batch, nlp, target_lemma_map, context_mapper=None, chunk=500
     # (start, end, lemma) of replaced words, as positions in the combined text
     fixed_spans = [[] for _ in contexts_before]
     if context_mapper is not None:
-        for i, (b, t, a) in enumerate(zip(contexts_before, target_hit_forms, contexts_after)):
+        for i, (b, t, a) in enumerate(
+            zip(contexts_before, target_hit_forms, contexts_after)
+        ):
             b, spans_b = context_mapper(b)
             a, spans_a = context_mapper(a)
-            offset = len(b) + 1 + len(t) + 1  # start of context_after in the combined text
+            offset = (
+                len(b) + 1 + len(t) + 1
+            )  # start of context_after in the combined text
             contexts_before[i], contexts_after[i] = b, a
-            fixed_spans[i] = spans_b + [(s + offset, e + offset, lem) for s, e, lem in spans_a]
-    texts = [f"{b} {t} {a}" for b, t, a in zip(contexts_before, target_hit_forms, contexts_after)]
+            fixed_spans[i] = spans_b + [
+                (s + offset, e + offset, lem) for s, e, lem in spans_a
+            ]
+    texts = [
+        f"{b} {t} {a}"
+        for b, t, a in zip(contexts_before, target_hit_forms, contexts_after)
+    ]
 
     # initialize empty result lists
     before_lemmas, before_pos_tags, before_genders = [], [], []
@@ -1102,7 +1200,9 @@ def lemmatize_batch(batch, nlp, target_lemma_map, context_mapper=None, chunk=500
         # for every document, calculate the target word position
         for i, doc in zip(idx, docs):
             t_start = len(contexts_before[i]) + 1  # starts at context_before +1
-            t_end = t_start + len(target_hit_forms[i])  # ends at context_before +1 + len
+            t_end = t_start + len(
+                target_hit_forms[i]
+            )  # ends at context_before +1 + len
             bl, bp, bg, al, ap, ag = [], [], [], [], [], []
             spans = fixed_spans[i]
             span_starts = [s for s, _, _ in spans]
@@ -1119,15 +1219,25 @@ def lemmatize_batch(batch, nlp, target_lemma_map, context_mapper=None, chunk=500
                             continue
                         spans_done.add(k)
                         w0 = next((w for w in tok.words if w.upos != "PUNCT"), None)
-                        words = [(spans[k][2], w0.upos if w0 else "X", gender(w0) if w0 else None)]
+                        words = [
+                            (
+                                spans[k][2],
+                                w0.upos if w0 else "X",
+                                gender(w0) if w0 else None,
+                            )
+                        ]
                     else:
                         # words are syntactical units (e.g. "zu" + "dem"); punctuation is skipped;
                         # if no lemma is available, use original text
                         words = [
-                            (w.lemma or w.text, w.upos, gender(w)) for w in tok.words if w.upos != "PUNCT"
+                            (w.lemma or w.text, w.upos, gender(w))
+                            for w in tok.words
+                            if w.upos != "PUNCT"
                         ]
                     for lemma, upos, gen in words:
-                        if tok.end_char <= t_start:  # determine whether it belongs to before or after
+                        if (
+                            tok.end_char <= t_start
+                        ):  # determine whether it belongs to before or after
                             bl.append(lemma)
                             bp.append(upos)
                             bg.append(gen)
@@ -1162,13 +1272,21 @@ def lemmatize_batch(batch, nlp, target_lemma_map, context_mapper=None, chunk=500
             pl.Series("context_after_genders", after_genders, dtype=list_type),
         )
         # adds the target lemma, mapped from the target form via the dict generated above
-        .with_columns(pl.col("target_form").replace(target_lemma_map).alias("target_lemma"))
+        .with_columns(
+            pl.col("target_form").replace(target_lemma_map).alias("target_lemma")
+        )
         # we processed context_before and context_after separately, assuming this could be of use later
         # for the moment, we only need the joint columns, so before and after get concatenated here
         .with_columns(
-            pl.concat_list("context_before_lemmas", "context_after_lemmas").alias("context_lemmas"),
-            pl.concat_list("context_before_pos_tags", "context_after_pos_tags").alias("context_pos_tags"),
-            pl.concat_list("context_before_genders", "context_after_genders").alias("context_gender"),
+            pl.concat_list("context_before_lemmas", "context_after_lemmas").alias(
+                "context_lemmas"
+            ),
+            pl.concat_list("context_before_pos_tags", "context_after_pos_tags").alias(
+                "context_pos_tags"
+            ),
+            pl.concat_list("context_before_genders", "context_after_genders").alias(
+                "context_gender"
+            ),
         )
         # also drop the separate columns
         # this way, the data structure is identical between spacy and stanza files
@@ -1219,15 +1337,21 @@ def lemmatize_kwic_hits(
     fingerprint = {
         "rows": kwic_hits.height,
         "batch_size": batch_size,
-        "hash": hashlib.sha1(kwic_hits.hash_rows(seed=0).to_numpy().tobytes()).hexdigest(),
+        "hash": hashlib.sha1(
+            kwic_hits.hash_rows(seed=0).to_numpy().tobytes()
+        ).hexdigest(),
         "target_lemma_map": hashlib.sha1(
-            json.dumps(sorted(target_lemma_map.items()), ensure_ascii=False).encode("utf-8")
+            json.dumps(sorted(target_lemma_map.items()), ensure_ascii=False).encode(
+                "utf-8"
+            )
         ).hexdigest(),
         "settings": settings or {},
     }
     if parts_dir.exists():
         try:
-            same_input = json.loads(meta_path.read_text(encoding="utf-8")) == fingerprint
+            same_input = (
+                json.loads(meta_path.read_text(encoding="utf-8")) == fingerprint
+            )
         except (OSError, ValueError):
             same_input = False
         if not same_input:
@@ -1245,7 +1369,11 @@ def lemmatize_kwic_hits(
                 on_progress(batch.height)
             continue
         lemmatized = lemmatize_batch(
-            batch, nlp, target_lemma_map, context_mapper=context_mapper, on_progress=on_progress
+            batch,
+            nlp,
+            target_lemma_map,
+            context_mapper=context_mapper,
+            on_progress=on_progress,
         )
         tmp = part.with_name(part.stem + ".tmp.parquet")
         lemmatized.write_parquet(tmp)
@@ -1286,9 +1414,12 @@ def _(mo):
 @app.cell
 def _(mo):
     run_lemma = mo.ui.run_button(label="Lemmatisierung starten")
-    map_contexts = mo.ui.checkbox(value=True, label="Zielwortliste auf Kontextwörter anwenden")
+    map_contexts = mo.ui.checkbox(
+        value=True, label="Zielwortliste auf Kontextwörter anwenden"
+    )
     gender_rule = mo.ui.checkbox(
-        value=True, label="Gegenderte Formen außerhalb der Liste vereinheitlichen (Bürger*innen → Bürgerinnen)"
+        value=True,
+        label="Gegenderte Formen außerhalb der Liste vereinheitlichen (Bürger*innen → Bürgerinnen)",
     )
     mo.vstack([map_contexts, gender_rule, run_lemma])
     return gender_rule, map_contexts, run_lemma
@@ -1314,7 +1445,9 @@ def _(
     # this cell only runs when the "Lemmatisierung starten" button above is hit
     mo.stop(
         not run_lemma.value,
-        mo.md("**Lemmatisierung starten** klicken, um die geladenen KWIC-Treffer zu lemmatisieren."),
+        mo.md(
+            "**Lemmatisierung starten** klicken, um die geladenen KWIC-Treffer zu lemmatisieren."
+        ),
     )
 
     nlp_st2 = stanza.Pipeline(
@@ -1334,18 +1467,23 @@ def _(
         "map_contexts": map_contexts.value,
         "gender_rule": gender_rule.value,
         # the list used for the contexts (differs from target_lemma_map with TARGET_LEMMAS_FROM_STANZA)
-        "context_list": _hashlib.sha1(repr(sorted(target_form_lemmas.items())).encode("utf-8")).hexdigest(),
+        "context_list": _hashlib.sha1(
+            repr(sorted(target_form_lemmas.items())).encode("utf-8")
+        ).hexdigest(),
     }
     _mapper = None
     if map_contexts.value or gender_rule.value:
         _mapper = make_context_mapper(
-            target_form_lemmas if map_contexts.value else {}, gender_rule=gender_rule.value
+            target_form_lemmas if map_contexts.value else {},
+            gender_rule=gender_rule.value,
         )
 
     # store results as parquet file, in the same folder and under the same name as read below
     # (the cell below has to be run again afterwards, it does not depend on this one)
     _out = out_dir / f"kwic_hits_lemmatized_stanza_{run_id}.parquet"
-    with mo.status.progress_bar(total=kwic_hits.height, title="Lemmatisierung Kontext") as bar3:
+    with mo.status.progress_bar(
+        total=kwic_hits.height, title="Lemmatisierung Kontext"
+    ) as bar3:
         _n_computed = lemmatize_kwic_hits(
             kwic_hits,
             nlp_st2,
@@ -1369,7 +1507,9 @@ def _(kwic_control_mode, kwic_mode):
 
 @app.cell
 def _(out_dir, run_id):
-    print(f"Will load the following pregenerated list: '{out_dir}/kwic_hits_lemmatized_stanza_{run_id}.parquet'")
+    print(
+        f"Will load the following pregenerated list: '{out_dir}/kwic_hits_lemmatized_stanza_{run_id}.parquet'"
+    )
     return
 
 
@@ -1378,7 +1518,9 @@ def _(out_dir, pl, run_id):
     # loads a pre-calculated list (written by the lemmatization above, or by an earlier run).
     # Replace "stanza" with "spacy" to load the spacy lemmatization.
     # lazy: the following steps stream through the file instead of loading it at once
-    kwic_hits_lemmatized = pl.scan_parquet(out_dir / f"kwic_hits_lemmatized_stanza_{run_id}.parquet")
+    kwic_hits_lemmatized = pl.scan_parquet(
+        out_dir / f"kwic_hits_lemmatized_stanza_{run_id}.parquet"
+    )
     kwic_hits_lemmatized.head(100).collect()
     return (kwic_hits_lemmatized,)
 
@@ -1424,10 +1566,16 @@ def spelling_map(kwic_hits_lemmatized, min_ratio=30, overrides=None):
     )
     # word counts of the original texts (target form included), only words with ß or ss
     text = pl.concat_str(
-        [pl.col(c).fill_null("") for c in ("context_before", "target_form", "context_after")], separator=" "
+        [
+            pl.col(c).fill_null("")
+            for c in ("context_before", "target_form", "context_after")
+        ],
+        separator=" ",
     )
     words = (
-        kwic_hits_lemmatized.select(text.str.to_lowercase().str.extract_all(r"\w+").alias("word"))
+        kwic_hits_lemmatized.select(
+            text.str.to_lowercase().str.extract_all(r"\w+").alias("word")
+        )
         .explode("word")
         .filter(pl.col("word").str.contains("ß|ss"))
         .group_by("word")
@@ -1447,8 +1595,19 @@ def spelling_map(kwic_hits_lemmatized, min_ratio=30, overrides=None):
         if new is None:
             result.pop(old, None)
         elif old in n_lemma:
-            result[old] = (new, n_lemma[old], n_word.get(old.lower(), 0), n_word.get(new.lower(), 0))
-    schema = {"old": pl.Utf8, "new": pl.Utf8, "n_lemma": pl.Int64, "n_word_old": pl.Int64, "n_word_new": pl.Int64}
+            result[old] = (
+                new,
+                n_lemma[old],
+                n_word.get(old.lower(), 0),
+                n_word.get(new.lower(), 0),
+            )
+    schema = {
+        "old": pl.Utf8,
+        "new": pl.Utf8,
+        "n_lemma": pl.Int64,
+        "n_word_old": pl.Int64,
+        "n_word_new": pl.Int64,
+    }
     return pl.DataFrame(
         [(o, *v) for o, v in result.items()], schema=schema, orient="row"
     ).sort("n_lemma", "old", descending=[True, False])
@@ -1456,7 +1615,9 @@ def spelling_map(kwic_hits_lemmatized, min_ratio=30, overrides=None):
 
 @app.cell
 def _(mo):
-    fix_spelling = mo.ui.checkbox(value=True, label="Alte Rechtschreibung (ß) in den Lemmata korrigieren")
+    fix_spelling = mo.ui.checkbox(
+        value=True, label="Alte Rechtschreibung (ß) in den Lemmata korrigieren"
+    )
     fix_spelling
     return (fix_spelling,)
 
@@ -1527,7 +1688,10 @@ def feminine_base_map(kwic_hits_lemmatized, overrides=None):
         .explode("lemma", "upos", "gender")
         .filter(pl.col("upos") == "NOUN")
         .group_by("lemma")
-        .agg(pl.len().alias("n"), (pl.col("gender") == "Fem").fill_null(False).mean().alias("fem_share"))
+        .agg(
+            pl.len().alias("n"),
+            (pl.col("gender") == "Fem").fill_null(False).mean().alias("fem_share"),
+        )
         .collect()
     )
     n = dict(zip(nouns["lemma"], nouns["n"]))
@@ -1545,7 +1709,12 @@ def feminine_base_map(kwic_hits_lemmatized, overrides=None):
 
     result, unmapped = {}, []
     for lemma, count in n.items():
-        if not (lemma.endswith("in") and len(lemma) > 4 and lemma[0].isupper() and feminine[lemma]):
+        if not (
+            lemma.endswith("in")
+            and len(lemma) > 4
+            and lemma[0].isupper()
+            and feminine[lemma]
+        ):
             continue
         for group in candidates(lemma[:-2]):
             found = [c for c in group if c in n and not feminine[c]]
@@ -1569,15 +1738,24 @@ def feminine_base_map(kwic_hits_lemmatized, overrides=None):
             result.pop(fem, None)
         elif fem in n:
             result[fem] = (base, n[fem], n.get(base, 0))
-    schema = {"feminine": pl.Utf8, "base": pl.Utf8, "n_feminine": pl.Int64, "n_base": pl.Int64}
+    schema = {
+        "feminine": pl.Utf8,
+        "base": pl.Utf8,
+        "n_feminine": pl.Int64,
+        "n_base": pl.Int64,
+    }
     return pl.DataFrame(
-        [(f, b, nf, nb) for f, (b, nf, nb) in result.items()], schema=schema, orient="row"
+        [(f, b, nf, nb) for f, (b, nf, nb) in result.items()],
+        schema=schema,
+        orient="row",
     ).sort("n_feminine", "feminine", descending=[True, False])
 
 
 @app.cell
 def _(mo):
-    demove_feminines = mo.ui.checkbox(value=True, label="Movierte Feminina auf die Grundform zurückführen")
+    demove_feminines = mo.ui.checkbox(
+        value=True, label="Movierte Feminina auf die Grundform zurückführen"
+    )
     demove_feminines
     return (demove_feminines,)
 
@@ -1596,7 +1774,9 @@ def _(demove_feminines, kwic_hits_spelling, out_dir, pl, run_id):
         print("Movierte Feminina: ausgeschaltet")
     elif "context_gender" not in kwic_hits_spelling.collect_schema().names():
         kwic_hits_contexts = kwic_hits_spelling
-        print("Movierte Feminina: Lauf ohne Spalte context_gender, Lemmatisierung neu starten")
+        print(
+            "Movierte Feminina: Lauf ohne Spalte context_gender, Lemmatisierung neu starten"
+        )
     else:
         feminine_bases = feminine_base_map(kwic_hits_spelling, FEMININE_OVERRIDES)
         feminine_bases.write_csv(out_dir / f"feminine_base_map_{run_id}.csv")
@@ -1637,7 +1817,13 @@ def _(mo):
 
 
 @app.function
-def slice_kwic_hits(kwic_hits_lemmatized, corpus, slice_grid, facet_columns=(), missing_value="nicht zugeordnet"):
+def slice_kwic_hits(
+    kwic_hits_lemmatized,
+    corpus,
+    slice_grid,
+    facet_columns=(),
+    missing_value="nicht zugeordnet",
+):
     """
     Add the date (as date) and the time slice label to the lemmatized hits; lazy in, lazy out.
 
@@ -1647,16 +1833,26 @@ def slice_kwic_hits(kwic_hits_lemmatized, corpus, slice_grid, facet_columns=(), 
     """
     import polars as pl
 
-    missing_cols = set(facet_columns) - set(kwic_hits_lemmatized.collect_schema().names())
-    assert not missing_cols, f"Facettenspalten fehlen in den Treffern: {missing_cols} (KWIC-Extraktion neu starten)"
+    missing_cols = set(facet_columns) - set(
+        kwic_hits_lemmatized.collect_schema().names()
+    )
+    assert not missing_cols, (
+        f"Facettenspalten fehlen in den Treffern: {missing_cols} (KWIC-Extraktion neu starten)"
+    )
     kwic_hits_lemmatized = kwic_hits_lemmatized.with_columns(
-        pl.col(c).cast(pl.Utf8).str.strip_chars().replace("", None).fill_null(missing_value)
+        pl.col(c)
+        .cast(pl.Utf8)
+        .str.strip_chars()
+        .replace("", None)
+        .fill_null(missing_value)
         for c in facet_columns
     )
 
     if "date" in kwic_hits_lemmatized.collect_schema().names():
         # date written by the KWIC extraction; moved to the end, where the join below puts it too
-        sliced = kwic_hits_lemmatized.select(pl.exclude("date"), pl.col("date").str.to_date())
+        sliced = kwic_hits_lemmatized.select(
+            pl.exclude("date"), pl.col("date").str.to_date()
+        )
     else:
         # hits from runs before the date was written with them: take it from the corpus via id
         sliced = kwic_hits_lemmatized.join(
@@ -1698,7 +1894,11 @@ def _(
     # (kwic_hits_contexts = lemmatized hits, old ß spellings corrected, feminine context lemmas
     # reduced to the base form)
     kwic_hits_sliced = slice_kwic_hits(
-        kwic_hits_contexts, corpus, slice_grid_picker.value, facet_columns, MISSING_FACET_VALUE
+        kwic_hits_contexts,
+        corpus,
+        slice_grid_picker.value,
+        facet_columns,
+        MISSING_FACET_VALUE,
     )
 
     _path = out_dir / f"kwic_hits_sliced_{run_id}_{slice_grid_picker.value}.parquet"
@@ -1711,7 +1911,9 @@ def _(
 
 
 @app.function
-def shuffle_contexts(kwic_hits, columns=("context_lemmas", "context_pos_tags", "context_gender"), seed=42):
+def shuffle_contexts(
+    kwic_hits, columns=("context_lemmas", "context_pos_tags", "context_gender"), seed=42
+):
     """
     Shuffle the word order within each context; lazy in, lazy out.
 
@@ -1742,7 +1944,10 @@ def shuffle_contexts(kwic_hits, columns=("context_lemmas", "context_pos_tags", "
 def _(kwic_hits_sliced, out_dir, pl, run_id, slice_grid_picker):
     # same file as above, but with the word order shuffled within each context (control
     # condition for order-sensitive methods); counts based on bags of words are unaffected
-    _path = out_dir / f"kwic_hits_sliced_{run_id}_{slice_grid_picker.value}_shuffled.parquet"
+    _path = (
+        out_dir
+        / f"kwic_hits_sliced_{run_id}_{slice_grid_picker.value}_shuffled.parquet"
+    )
     _tmp = _path.with_name(_path.stem + ".tmp.parquet")
     shuffle_contexts(kwic_hits_sliced).sink_parquet(_tmp)
     _tmp.replace(_path)
@@ -1752,12 +1957,19 @@ def _(kwic_hits_sliced, out_dir, pl, run_id, slice_grid_picker):
     _csv_tmp = _csv.with_name(_csv.stem + ".tmp.csv")
     (
         pl.scan_parquet(_path)
-        .drop(["target_form", "position", "context_before", "context_after", "sentence_based"])
+        .drop(
+            [
+                "target_form",
+                "position",
+                "context_before",
+                "context_after",
+                "sentence_based",
+            ]
+        )
         .with_columns(pl.col(pl.List(pl.String)).list.join(" "))
         .sink_csv(_csv_tmp)
     )
     _csv_tmp.replace(_csv)
-
 
     pl.read_parquet(_path, n_rows=100)
     return
@@ -1791,8 +2003,7 @@ def count_cooc(kwic_hits_sliced, facet_columns=()):
     # empty contexts may occur (e.g. in case of one-word-headlines treated as one KWIC hit). empty_as_null=False excludes them from the list - they don't contribute to occurences anyway.
     keys = ["slice", *facet_columns, "target_lemma"]
     return (
-        kwic_hits_sliced
-        .select(*keys, "context_lemmas")
+        kwic_hits_sliced.select(*keys, "context_lemmas")
         .explode("context_lemmas", empty_as_null=False)
         # group by target word, context word and slice (and facet values)
         .group_by([*keys, "context_lemmas"])
@@ -1815,18 +2026,18 @@ def _(facet_columns, kwic_hits_sliced, pl):
     # counts per facet value; the counts per target word and slice are their sum (every hit has
     # exactly one value per facet, missing ones were set to MISSING_FACET_VALUE when slicing)
     cooc_counts_facets = count_cooc(kwic_hits_sliced, facet_columns)
-    cooc_counts = (
-        cooc_counts_facets
-        .group_by(["slice", "target_lemma", "context_lemma"])
-        .agg(pl.col("n_cooc").sum())
-    )
+    cooc_counts = cooc_counts_facets.group_by(
+        ["slice", "target_lemma", "context_lemma"]
+    ).agg(pl.col("n_cooc").sum())
     assert cooc_counts["n_cooc"].sum() == cooc_counts_facets["n_cooc"].sum()
 
     # facet values with their number of hits, for facets_schema in the bundle; most frequent first,
     # because the frontend assigns its colors in this order
     facet_values = {
         _c: (
-            kwic_hits_sliced.group_by(_c).len().collect(engine="streaming")
+            kwic_hits_sliced.group_by(_c)
+            .len()
+            .collect(engine="streaming")
             .sort(["len", _c], descending=[True, False])
             .rename({_c: "id", "len": "n_hits"})
             .to_dicts()
@@ -1881,15 +2092,23 @@ def _(
                 for _row in _csv.DictReader(_fh, delimiter=";"):
                     _id = (_row.pop("id") or "").strip()
                     if _id:
-                        _attrs[_id] = {_c: _v.strip() for _c, _v in _row.items() if _v and _v.strip()}
-        _values = [{**_attrs.get(_v["id"], {}), **_v} for _v in facet_values[facet["column"]]]
+                        _attrs[_id] = {
+                            _c: _v.strip()
+                            for _c, _v in _row.items()
+                            if _v and _v.strip()
+                        }
+        _values = [
+            {**_attrs.get(_v["id"], {}), **_v} for _v in facet_values[facet["column"]]
+        ]
         _found = {_v["id"] for _v in _values}
         _missing = sorted(_found - set(_attrs) - {MISSING_FACET_VALUE})
         _unused = sorted(set(_attrs) - _found)
         if _table.is_file():
             print(f"{_table}: {len(_attrs)} Einträge")
             if _missing:
-                print(f"  im Korpus, nicht in der Tabelle (Bezeichnung = ID): {', '.join(_missing)}")
+                print(
+                    f"  im Korpus, nicht in der Tabelle (Bezeichnung = ID): {', '.join(_missing)}"
+                )
             if _unused:
                 print(f"  in der Tabelle, ohne Treffer im Korpus: {', '.join(_unused)}")
         return {**facet, "values": _values}
@@ -1910,7 +2129,10 @@ def _(
         _json.dump(_declaration, _fh, ensure_ascii=False, indent=2)
     print(f"Gespeichert: {_meta_path}")
     for _f in _declaration["facets"]:
-        print(f"  {_f['label']}: " + ", ".join(f"{_v['id']} ({_v['n_hits']:,})" for _v in _f["values"]))
+        print(
+            f"  {_f['label']}: "
+            + ", ".join(f"{_v['id']} ({_v['n_hits']:,})" for _v in _f["values"])
+        )
 
     # everything pipeline_emb_ppmi.py reads, for the copy switch at the end
     pre_output_files = [

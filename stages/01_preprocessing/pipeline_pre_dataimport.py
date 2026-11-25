@@ -581,7 +581,7 @@ def output_key(day, split):
 
 
 @app.function
-def write_corpus(entries, input_dir, output_dir, basename, split, dehyphenate, collapse_whitespace, on_progress=None):
+def write_corpus(entries, input_dir, output_dir, basename, split, dehyphenate, collapse_whitespace, on_progress=None, n_jobs=1, docs_per_task=10):
     """
     Decode, clean and write the editions as CSV (UTF-8, columns date, text, facet_1).
 
@@ -589,6 +589,21 @@ def write_corpus(entries, input_dir, output_dir, basename, split, dehyphenate, c
     Every output file is first written as *.part and renamed when complete, so an aborted run
     never leaves a truncated CSV that looks finished. Returns (written files, report rows).
     """
+    from itertools import batched
+
+    from joblib import Parallel, delayed
+
+    def chunk_texts(chunk):  # runs in a worker process, one package of editions
+        results = []
+        for entry in chunk:
+            raw = (input_dir / entry["file"]).read_bytes()
+            text, encoding = decode_bytes(raw)
+            text, mojibake_fixed, mojibake_left = fix_mojibake(text)
+            replacement_chars = text.count("�")
+            text = clean_text(text, dehyphenate, collapse_whitespace)
+            results.append((entry, len(raw), text, encoding, mojibake_fixed, mojibake_left, replacement_chars))
+        return results
+
     output_dir.mkdir(parents=True, exist_ok=True)
     # remove outputs of earlier runs with the same base name, otherwise e.g. a single file and
     # yearly files would be lying next to each other
@@ -607,12 +622,9 @@ def write_corpus(entries, input_dir, output_dir, basename, split, dehyphenate, c
             written.append(final)
 
     try:
-        for entry in entries:
-            raw = (input_dir / entry["file"]).read_bytes()
-            text, encoding = decode_bytes(raw)
-            text, mojibake_fixed, mojibake_left = fix_mojibake(text)
-            replacement_chars = text.count("�")
-            text = clean_text(text, dehyphenate, collapse_whitespace)
+        jobs = (delayed(chunk_texts)(chunk) for chunk in batched(entries, docs_per_task))
+        results = (r for chunk in Parallel(n_jobs=n_jobs, return_as="generator")(jobs) for r in chunk)  # input order
+        for entry, bytes_in, text, encoding, mojibake_fixed, mojibake_left, replacement_chars in results:
             digest = hashlib.sha1(text.encode("utf-8")).hexdigest()
 
             if not text:
@@ -642,7 +654,7 @@ def write_corpus(entries, input_dir, output_dir, basename, split, dehyphenate, c
                     "mojibake_fixed": mojibake_fixed,
                     "mojibake_left": mojibake_left,
                     "replacement_chars": replacement_chars,
-                    "bytes_in": len(raw),
+                    "bytes_in": bytes_in,
                     "chars_out": len(text),
                     "status": status,
                 }
@@ -710,6 +722,8 @@ def _(
             dehyphenate.value,
             collapse_whitespace.value,
             on_progress=_bar.update,
+            n_jobs=8,
+            docs_per_task=10,
         )
 
     import_report = pl.DataFrame(_report_rows, infer_schema_length=None)
@@ -718,7 +732,7 @@ def _(
     _sizes = sum(_p.stat().st_size for _p in written_files)
     print(f"{len(written_files)} Datei(en) geschrieben, zusammen {_sizes / 1e9:,.2f} GB:")
     for _p in written_files:
-        print(f"  {_p.relative_to(BASE_DIR)}  ({_p.stat().st_size / 1e6:,.1f} MB)")
+        print(f"  {_p}  ({_p.stat().st_size / 1e6:,.1f} MB)")
     return import_report, written_files
 
 

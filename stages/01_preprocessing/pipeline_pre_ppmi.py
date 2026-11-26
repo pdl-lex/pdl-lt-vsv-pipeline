@@ -292,9 +292,14 @@ def _(Path, pl, project_picker, re):
 
 
 @app.cell
-def _(corpus_files, pl, prepare_corpus, source_columns):
+def _(bundle_facets, corpus_files, pl, prepare_corpus, source_columns):
     # lazy table: nothing is loaded here; .head() only reads the beginning of the file
-    corpus = pl.scan_csv(corpus_files, null_values="NA").pipe(prepare_corpus)
+    # facet source columns are read as strings (IDs like "102605236X", see the KWIC hits below)
+    corpus = pl.scan_csv(
+        corpus_files,
+        null_values="NA",
+        schema_overrides={_f["source"]: pl.Utf8 for _f in bundle_facets},
+    ).pipe(prepare_corpus)
 
     # add and populate id column if not existent
     # (the KWIC extraction numbers the rows in the same way, see read_corpus_rows)
@@ -918,7 +923,7 @@ def _(
     # file is complete: let the load cell read it again
     set_kwic_version(lambda v: v + 1)
 
-    pl.read_csv(_out, n_rows=100, null_values="NA")
+    pl.read_csv(_out, n_rows=100, null_values="NA", infer_schema=False)
     return
 
 
@@ -937,13 +942,19 @@ def _(out_dir, run_id):
 
 
 @app.cell
-def _(get_kwic_version, out_dir, pl, run_id):
+def _(facet_columns, get_kwic_version, out_dir, pl, run_id):
     # Read pre-generated list (written by the extraction above, or by an earlier run)
     # default modes are "punkt", "somajo" and "window20"
     # Use control above to switch
     # run again automatically after every extraction (via get_kwic_version)
     get_kwic_version()
-    kwic_hits = pl.read_csv(out_dir / f"kwic_hits_{run_id}.csv", null_values="NA")
+    # facet values are IDs, always strings: inferred from the first rows, "1026052360" would make
+    # the column Int64, and "102605236X" further down would fail (or leading zeros get lost)
+    kwic_hits = pl.read_csv(
+        out_dir / f"kwic_hits_{run_id}.csv",
+        null_values="NA",
+        schema_overrides={_c: pl.Utf8 for _c in facet_columns},
+    )
     print(f"Geladen: kwic_hits_{run_id}.csv")
     kwic_hits
     return (kwic_hits,)

@@ -21,7 +21,8 @@ with app.setup:
     BASE_DIR = Path(__file__).resolve().parent
 
     # ------------------------------------------------------------------
-    # file name parsing: date patterns, tried in this order on the lower-cased file stem.
+    # file name parsing: date patterns, tried in this order on the file stem (case-insensitive;
+    # the publication name keeps its case, IDs like "102605236X" must stay as they are).
     # Add new variants here. Named groups: y (year), m (month), d (day),
     # mname (month name), n (issue number, or month, see two_part_mode).
     # (?<!\d) and (?!\d) make sure a pattern never cuts a longer digit run.
@@ -46,7 +47,7 @@ with app.setup:
     # a match of these patterns is clearly meant as a date: if it is invalid (31.02.), the file name
     # counts as not recognized, instead of falling back to a weaker pattern ("02.2025" as issue 2)
     STRICT_KINDS = {"ymd", "dmy"}
-    DATE_REGEXES = [(kind, re.compile(rx)) for kind, rx in DATE_PATTERNS]
+    DATE_REGEXES = [(kind, re.compile(rx, re.IGNORECASE)) for kind, rx in DATE_PATTERNS]
 
     # plausible years; protects against e.g. "spiegel_1234_5678"
     MIN_YEAR, MAX_YEAR = 1900, 2100
@@ -69,7 +70,7 @@ with app.setup:
     # ExtracEval appends "-<8 hex chars>" (content hash) to the document id
     HASH_SUFFIX = re.compile(r"-[0-9a-f]{8}$")
     # leftover words next to an issue number ("spiegel_nr_37_2025" -> "spiegel")
-    ISSUE_WORDS = re.compile(r"(?:^|_)(?:nr|no|heft|ausgabe)$")
+    ISSUE_WORDS = re.compile(r"(?:^|_)(?:nr|no|heft|ausgabe)$", re.IGNORECASE)
 
     # ------------------------------------------------------------------
     # encoding
@@ -189,7 +190,7 @@ def _():
     | `20250823_spiegel` | Datum vor dem Namen |
     | `SPIEGEL_2025_37-a1b2c3d4` | mit Prüfsummen-Anhang, wie ExtracEval ihn an die Dokument-ID hängt |
 
-    Was nach Entfernen des Datums übrig bleibt, ist der Name der Publikation (klein geschrieben, Trennzeichen vereinheitlicht zu `_`). Weitere Varianten lassen sich in `DATE_PATTERNS` im Setup-Abschnitt am Anfang ergänzen.
+    Was nach Entfernen des Datums übrig bleibt, ist der Name der Publikation. Er wird in der Schreibung des Dateinamens übernommen (IDs wie `102605236X` bleiben unverändert), nur die Trennzeichen werden zu `_` vereinheitlicht. Weitere Varianten lassen sich in `DATE_PATTERNS` im Setup-Abschnitt am Anfang ergänzen.
 
     **Zweiteilige Angaben** wie `2025_37` sind mehrdeutig: Bei Wochentiteln ist die Zahl meist die Heftnummer, bei Monatstiteln der Monat. Mit der Einstellung „Heftnummer = Kalenderwoche“ wird Heft 37 dem Donnerstag der ISO-Kalenderwoche 37 zugeordnet (der Donnerstag liegt immer im richtigen Jahr). Das ist eine Näherung: Heftnummern und Kalenderwochen stimmen nicht immer überein, für Quartale und Halbjahre als Zeitscheiben reicht die Genauigkeit aber in aller Regel. Solche Daten sind in der Übersicht als `issue_week` bzw. `month` markiert.
     """)
@@ -210,7 +211,7 @@ def to_date(kind, groups, two_part_mode):
             # ISO week n, Thursday: always lies in year y
             return date.fromisocalendar(y, n, 4), "issue_week"
         if groups.get("mname") is not None:
-            m = MONTHS.get(groups["mname"])
+            m = MONTHS.get(groups["mname"].lower())
             if m is None:
                 return None
         else:
@@ -233,8 +234,7 @@ def parse_stem(stem, two_part_mode="week"):
         # try without the ExtracEval hash first; "spiegel-20250823" itself looks like a hash suffix,
         # so the full stem remains the fallback
         candidates.insert(0, stem[: hash_match.start()])
-    for candidate in candidates:
-        s = candidate.lower()
+    for s in candidates:
         for kind, regex in DATE_REGEXES:
             for match in regex.finditer(s):
                 parsed = to_date(kind, match.groupdict(), two_part_mode)
@@ -275,7 +275,7 @@ def _():
 @app.cell(hide_code=True)
 def _():
     mo.md(r"""
-    Der Schlüssel wird als Facettenwert (`facet_1`) geschrieben und ist die ID der Publikation im Bundle. Kommt dieselbe Publikation unter verschiedenen Schreibweisen vor (`der_spiegel`, `spiegel`), bildet `MAGAZINE_NAMES` die Varianten auf eine ID ab. Schlüssel ohne Eintrag bleiben unverändert.
+    Der Schlüssel wird als Facettenwert (`facet_1`) geschrieben und ist die ID der Publikation im Bundle. Kommt dieselbe Publikation unter verschiedenen Schreibweisen vor (`der_spiegel`, `Spiegel`), bildet `MAGAZINE_NAMES` die Varianten auf eine ID ab. Schlüssel ohne Eintrag bleiben unverändert.
 
     Die Anzeigenamen stehen nicht hier, sondern in `input/facet_values_publication.csv` (Spalten `id;label`, weitere Spalten möglich). Das Preprocessing übernimmt sie in das Bundle. Die IDs dieser Tabelle sind das Ziel der Abbildung. Die Übersicht weiter unten zeigt alle gefundenen IDs und ob sie in der Tabelle stehen.
     """)
@@ -284,7 +284,7 @@ def _():
 
 @app.cell
 def _():
-    # lower-case key from the file name -> publication ID (facet value, column id of
+    # key from the file name (case as in the file name) -> publication ID (facet value, column id of
     # input/facet_values_publication.csv); only needed where the key differs from the ID
     MAGAZINE_NAMES = {
         # "der_spiegel": "spiegel",
@@ -783,7 +783,7 @@ def _():
 @app.cell
 def _(import_report, written_files):
     _check = (
-        pl.scan_csv(written_files, null_values="NA")
+        pl.scan_csv(written_files, null_values="NA", schema_overrides={"facet_1": pl.Utf8})
         .with_columns(pl.col("date").str.to_date())
         .select(
             pl.len().alias("rows"),
